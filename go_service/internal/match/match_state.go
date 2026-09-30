@@ -2,6 +2,7 @@ package match
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/domain"
@@ -29,7 +30,7 @@ type MatchSnapshot struct {
 	GameID     string
 	Status     Status
 	Events     []domain.Event
-	PlayerIDs  map[string]struct{}
+	PlayerIDs  []string
 	StartedAt  time.Time
 	FinishedAt *time.Time
 }
@@ -59,12 +60,12 @@ func (state *MatchState) Snapshot() MatchSnapshot {
 		GameID:    state.GameID,
 		Status:    state.Status,
 		Events:    cloneEvents(state.Events),
-		PlayerIDs: make(map[string]struct{}, len(state.PlayerIDs)),
 		StartedAt: state.StartedAt,
 	}
 	for playerID := range state.PlayerIDs {
-		snapshot.PlayerIDs[playerID] = struct{}{}
+		snapshot.PlayerIDs = append(snapshot.PlayerIDs, playerID)
 	}
+	sort.Strings(snapshot.PlayerIDs)
 	if state.FinishedAt != nil {
 		finishedAt := *state.FinishedAt
 		snapshot.FinishedAt = &finishedAt

@@ -3,6 +3,7 @@ package match
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/domain"
@@ -71,10 +72,14 @@ func (store *Store) Add(event domain.Event) (*domain.AnalysisRequest, error) {
 	finishedAt := event.Timestamp
 	state.Status = StatusFinished
 	state.FinishedAt = &finishedAt
+	events := cloneEvents(state.Events)
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].Timestamp.Before(events[j].Timestamp)
+	})
 	return &domain.AnalysisRequest{
 		MatchID: state.MatchID,
 		GameID:  state.GameID,
-		Events:  cloneEvents(state.Events),
+		Events:  events,
 	}, nil
 }
 

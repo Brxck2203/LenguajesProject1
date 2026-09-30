@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -89,6 +90,105 @@ func TestStoreRejectsActionAfterMatchFinished(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsGameMismatch(t *testing.T) {
+	store := NewStore()
+	start := matchEvent("start", "match_001", domain.TypeMatch, domain.ActionMatchStarted, domain.SystemPlayerID, domain.GameFootball, map[string]any{})
+	if _, err := store.Add(start); err != nil {
+		t.Fatalf("Add(MATCH_STARTED) returned error: %v", err)
+	}
+	event := matchEvent("mismatch", "match_001", domain.TypeAction, domain.ActionDamageDealt, "player_1", domain.GameFreeFire, map[string]any{
+		"targetPlayerId": "player_2",
+		"damage":         10,
+	})
+	if _, err := store.Add(event); !errors.Is(err, ErrGameMismatch) {
+		t.Fatalf("Add() error = %v, want ErrGameMismatch", err)
+	}
+}
+
+func TestStoreSnapshotPlayerIDsAreSorted(t *testing.T) {
+	store := NewStore()
+	start := matchEvent("start", "match_001", domain.TypeMatch, domain.ActionMatchStarted, domain.SystemPlayerID, domain.GameFootball, map[string]any{})
+	if _, err := store.Add(start); err != nil {
+		t.Fatalf("Add(MATCH_STARTED) returned error: %v", err)
+	}
+
+	for _, playerID := range []string{"player_z", "player_a", "player_m"} {
+		event := matchEvent("pass_"+playerID, "match_001", domain.TypeAction, domain.ActionPass, playerID, domain.GameFootball, map[string]any{
+			"receiverPlayerId": "receiver",
+			"completed":        true,
+		})
+		if _, err := store.Add(event); err != nil {
+			t.Fatalf("Add(PASS) for %s returned error: %v", playerID, err)
+		}
+	}
+
+	snapshot, ok := store.Get("match_001")
+	if !ok {
+		t.Fatal("expected match snapshot")
+	}
+	expected := []string{"player_a", "player_m", "player_z"}
+	if !reflect.DeepEqual(snapshot.PlayerIDs, expected) {
+		t.Fatalf("snapshot.PlayerIDs = %v, want %v", snapshot.PlayerIDs, expected)
+	}
+}
+
+func TestStoreAnalysisRequestOrdersEventsStablyByTimestamp(t *testing.T) {
+	store := NewStore()
+	start := matchEvent("start", "match_001", domain.TypeMatch, domain.ActionMatchStarted, domain.SystemPlayerID, domain.GameFootball, map[string]any{})
+	start.Timestamp = timestampAt(22, 0, 0)
+	if _, err := store.Add(start); err != nil {
+		t.Fatalf("Add(MATCH_STARTED) returned error: %v", err)
+	}
+
+	late := matchEvent("evt_late", "match_001", domain.TypeAction, domain.ActionPass, "player_late", domain.GameFootball, map[string]any{
+		"receiverPlayerId": "receiver",
+		"completed":        true,
+	})
+	late.Timestamp = timestampAt(22, 0, 10)
+	if _, err := store.Add(late); err != nil {
+		t.Fatalf("Add(evt_late) returned error: %v", err)
+	}
+
+	sameTimeFirst := matchEvent("evt_same_1", "match_001", domain.TypeAction, domain.ActionPass, "player_first", domain.GameFootball, map[string]any{
+		"receiverPlayerId": "receiver",
+		"completed":        true,
+	})
+	sameTimeFirst.Timestamp = timestampAt(22, 0, 5)
+	if _, err := store.Add(sameTimeFirst); err != nil {
+		t.Fatalf("Add(evt_same_1) returned error: %v", err)
+	}
+
+	sameTimeSecond := matchEvent("evt_same_2", "match_001", domain.TypeAction, domain.ActionPass, "player_second", domain.GameFootball, map[string]any{
+		"receiverPlayerId": "receiver",
+		"completed":        true,
+	})
+	sameTimeSecond.Timestamp = timestampAt(22, 0, 5)
+	if _, err := store.Add(sameTimeSecond); err != nil {
+		t.Fatalf("Add(evt_same_2) returned error: %v", err)
+	}
+
+	finish := matchEvent("finish", "match_001", domain.TypeMatch, domain.ActionMatchFinished, domain.SystemPlayerID, domain.GameFootball, map[string]any{})
+	finish.Timestamp = timestampAt(22, 0, 15)
+	request, err := store.Add(finish)
+	if err != nil {
+		t.Fatalf("Add(MATCH_FINISHED) returned error: %v", err)
+	}
+
+	expectedRequestOrder := []string{"start", "evt_same_1", "evt_same_2", "evt_late", "finish"}
+	if got := eventIDs(request.Events); !reflect.DeepEqual(got, expectedRequestOrder) {
+		t.Fatalf("request event order = %v, want %v", got, expectedRequestOrder)
+	}
+
+	snapshot, ok := store.Get("match_001")
+	if !ok {
+		t.Fatal("expected match snapshot")
+	}
+	expectedArrivalOrder := []string{"start", "evt_late", "evt_same_1", "evt_same_2", "finish"}
+	if got := eventIDs(snapshot.Events); !reflect.DeepEqual(got, expectedArrivalOrder) {
+		t.Fatalf("snapshot event order = %v, want arrival order %v", got, expectedArrivalOrder)
+	}
+}
+
 func TestStoreProcessesConcurrentMatches(t *testing.T) {
 	const matchCount = 12
 	store := NewStore()
@@ -143,7 +243,7 @@ func TestStoreSnapshotsAreDefensiveCopies(t *testing.T) {
 
 	snapshot, _ := store.Get("match_001")
 	snapshot.Events[0].Data[0] = '['
-	snapshot.PlayerIDs["injected"] = struct{}{}
+	snapshot.PlayerIDs[0] = "injected"
 
 	request, err := store.Add(matchEvent("finish", "match_001", domain.TypeMatch, domain.ActionMatchFinished, domain.SystemPlayerID, domain.GameFreeFire, map[string]any{}))
 	if err != nil {
@@ -153,7 +253,7 @@ func TestStoreSnapshotsAreDefensiveCopies(t *testing.T) {
 		t.Fatal("mutating a snapshot changed the stored event data")
 	}
 	finalSnapshot, _ := store.Get("match_001")
-	if _, exists := finalSnapshot.PlayerIDs["injected"]; exists {
+	if reflect.DeepEqual(finalSnapshot.PlayerIDs, snapshot.PlayerIDs) {
 		t.Fatal("mutating a snapshot changed the stored player IDs")
 	}
 	expectedFinishedAt := *finalSnapshot.FinishedAt
@@ -174,6 +274,18 @@ func addMatchStartAndFinish(t *testing.T, store *Store, matchID string) {
 	if _, err := store.Add(finish); err != nil {
 		t.Fatalf("Add(MATCH_FINISHED) returned error: %v", err)
 	}
+}
+
+func eventIDs(events []domain.Event) []string {
+	ids := make([]string, len(events))
+	for i, event := range events {
+		ids[i] = event.EventID
+	}
+	return ids
+}
+
+func timestampAt(hour, minute, second int) time.Time {
+	return time.Date(2026, time.September, 29, hour, minute, second, 0, time.UTC)
 }
 
 func matchEvent(eventID, matchID, eventType, action, playerID, gameID string, data map[string]any) domain.Event {
