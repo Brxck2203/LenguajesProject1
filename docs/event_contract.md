@@ -30,7 +30,7 @@ Go valida el contrato, controla el flujo, agrupa los eventos por partida y prepa
 | Campo | Tipo | Obligatorio | Descripción |
 |---|---|---:|---|
 | `eventId` | string | Sí | Identificador único del evento. |
-| `timestamp` | string | Sí | Fecha y hora en formato RFC 3339/ISO 8601 UTC. |
+| `timestamp` | string | Sí | Fecha y hora deserializable en formato RFC 3339; el contrato documenta UTC. |
 | `gameId` | string | Sí | Juego que produjo el evento, por ejemplo `MMA`, `FOOTBALL`, `MOTORCYCLE_RACING` o `FREE_FIRE`. |
 | `matchId` | string | Sí | Identificador de la partida a la que pertenece el evento. |
 | `playerId` | string | Sí | Jugador que ejecutó o generó la acción. Para eventos globales se usa `SYSTEM`. |
@@ -42,7 +42,7 @@ Go valida el contrato, controla el flujo, agrupa los eventos por partida y prepa
 
 - Todos los eventos deben tener los ocho campos del evento base.
 - `eventId` debe ser único dentro del flujo de eventos recibido.
-- `timestamp` debe estar expresado en UTC y ser válido según RFC 3339.
+- `timestamp` debe poder deserializarse como RFC 3339 a través de `time.Time`; el contrato documenta timestamps en UTC.
 - `gameId`, `matchId`, `playerId`, `type` y `action` no pueden estar vacíos.
 - `data` siempre debe ser un objeto JSON, aun cuando no contenga propiedades.
 - `playerId` identifica al actor de la acción. En eventos globales de partida como `MATCH_STARTED` y `MATCH_FINISHED`, el valor será `SYSTEM`.
@@ -65,6 +65,13 @@ Los siguientes eventos permiten a Go abrir, administrar y cerrar el estado tempo
   "data": {}
 }
 ```
+
+Reglas de ciclo de vida:
+
+1. `MATCH_STARTED` abre la partida y establece su juego y hora de inicio.
+2. Los eventos `ACTION` se agrupan por `matchId`; los jugadores participantes se registran sin calcular estadísticas.
+3. `MATCH_FINISHED` cierra la partida y genera un lote `AnalysisRequest` con todos sus eventos para Scala.
+4. Los eventos recibidos después del cierre se rechazan. Los identificadores de evento se mantienen únicos globalmente durante la ejecución del store.
 
 ```json
 {

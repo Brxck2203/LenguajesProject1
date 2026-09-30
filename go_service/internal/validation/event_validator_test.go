@@ -50,6 +50,53 @@ func TestValidateEventAcceptsFootballPass(t *testing.T) {
 	}
 }
 
+func TestValidateEventAcceptsLifecycleForEveryGame(t *testing.T) {
+	games := []string{
+		domain.GameMMA,
+		domain.GameFootball,
+		domain.GameMotorcycleRacing,
+		domain.GameFreeFire,
+	}
+	for _, gameID := range games {
+		t.Run(gameID, func(t *testing.T) {
+			event := validEvent(gameID, domain.TypeMatch, domain.ActionMatchStarted, map[string]any{})
+			event.PlayerID = domain.SystemPlayerID
+			if err := ValidateEvent(event); err != nil {
+				t.Fatalf("expected lifecycle event to be valid, got error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateEventRejectsLifecycleEventFromNonSystemPlayer(t *testing.T) {
+	event := validEvent(domain.GameFreeFire, domain.TypeMatch, domain.ActionMatchFinished, map[string]any{})
+
+	if err := ValidateEvent(event); err == nil {
+		t.Fatal("expected MATCH_FINISHED from a non-SYSTEM player to fail validation")
+	}
+}
+
+func TestValidateEventAcceptsCompletedLap(t *testing.T) {
+	event := validEvent(domain.GameMotorcycleRacing, domain.TypeAction, domain.ActionLapCompleted, map[string]any{
+		"lapNumber": 2,
+		"lapTimeMs": 90500,
+		"position":  1,
+	})
+	if err := ValidateEvent(event); err != nil {
+		t.Fatalf("expected lap completion to be valid, got error: %v", err)
+	}
+}
+
+func TestValidateEventRejectsActionForWrongGame(t *testing.T) {
+	event := validEvent(domain.GameMMA, domain.TypeAction, domain.ActionPass, map[string]any{
+		"receiverPlayerId": "player_8",
+		"completed":        true,
+	})
+	if err := ValidateEvent(event); err == nil {
+		t.Fatal("expected PASS for MMA to fail validation")
+	}
+}
+
 func TestValidateEventRejectsNonObjectData(t *testing.T) {
 	event := validEvent(domain.GameMMA, domain.TypeAction, domain.ActionStrikeLanded, map[string]any{
 		"targetPlayerId": "fighter_b",
@@ -58,6 +105,15 @@ func TestValidateEventRejectsNonObjectData(t *testing.T) {
 
 	if err := ValidateEvent(event); err == nil {
 		t.Fatal("expected array data to fail validation")
+	}
+}
+
+func TestIsLifecycleAction(t *testing.T) {
+	if !IsLifecycleAction(domain.ActionMatchStarted) || !IsLifecycleAction(domain.ActionMatchFinished) {
+		t.Fatal("expected both match lifecycle actions to be recognized")
+	}
+	if IsLifecycleAction(domain.ActionPass) {
+		t.Fatal("expected PASS not to be recognized as a lifecycle action")
 	}
 }
 

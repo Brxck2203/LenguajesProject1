@@ -30,6 +30,11 @@ var allowedActionsByGame = map[string]map[string]struct{}{
 	},
 }
 
+// IsLifecycleAction reports whether action controls a match's lifecycle.
+func IsLifecycleAction(action string) bool {
+	return action == domain.ActionMatchStarted || action == domain.ActionMatchFinished
+}
+
 // ValidateEvent checks the common event envelope and the minimum data required by each action.
 func ValidateEvent(event domain.Event) error {
 	if strings.TrimSpace(event.EventID) == "" {
@@ -79,7 +84,7 @@ func ValidateEvent(event domain.Event) error {
 }
 
 func validateEventType(event domain.Event) error {
-	if event.Action == domain.ActionMatchStarted || event.Action == domain.ActionMatchFinished {
+	if IsLifecycleAction(event.Action) {
 		if event.Type != domain.TypeMatch {
 			return fmt.Errorf("action %s requires type MATCH", event.Action)
 		}
@@ -92,7 +97,7 @@ func validateEventType(event domain.Event) error {
 }
 
 func validateLifecycleActor(event domain.Event) error {
-	if event.Action == domain.ActionMatchStarted || event.Action == domain.ActionMatchFinished {
+	if IsLifecycleAction(event.Action) {
 		if event.PlayerID != domain.SystemPlayerID {
 			return fmt.Errorf("action %s requires playerId SYSTEM", event.Action)
 		}
