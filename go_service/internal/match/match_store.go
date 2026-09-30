@@ -15,6 +15,8 @@ var (
 	ErrMatchNotStarted = errors.New("match has not started")
 	ErrMatchFinished   = errors.New("match is already finished")
 	ErrGameMismatch    = errors.New("gameId does not match the active match")
+	ErrInvalidEvent    = errors.New("invalid event")
+	ErrMatchStarted    = errors.New("match has already started")
 )
 
 type Store struct {
@@ -32,7 +34,7 @@ func NewStore() *Store {
 
 func (store *Store) Add(event domain.Event) (*domain.AnalysisRequest, error) {
 	if err := validation.ValidateEvent(event); err != nil {
-		return nil, fmt.Errorf("invalid event: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 
 	store.mu.Lock()
@@ -60,7 +62,7 @@ func (store *Store) Add(event domain.Event) (*domain.AnalysisRequest, error) {
 		return nil, fmt.Errorf("%w: matchId %s", ErrMatchFinished, event.MatchID)
 	}
 	if event.Action == domain.ActionMatchStarted {
-		return nil, fmt.Errorf("match %s has already started", event.MatchID)
+		return nil, fmt.Errorf("%w: matchId %s", ErrMatchStarted, event.MatchID)
 	}
 
 	state.addEvent(event)
