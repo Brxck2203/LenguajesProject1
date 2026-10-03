@@ -1,26 +1,56 @@
+import cask.Request
 import model.*
-import analytics.AggregatedMetrics
+import analytics.{AggregatedMetrics, PatternDetection}
+import scala.collection.mutable.ListBuffer
 
-@main def runAnalytics(): Unit =
-  val sampleEvents = List(
-    // MMA Events
-    GameEvent("e1", "2026-09-27T10:00:00Z", GameTypes.MMA, "m1", "p1", "ACTION", Actions.STRIKE_ATTEMPT),
-    GameEvent("e2", "2026-09-27T10:00:01Z", GameTypes.MMA, "m1", "p1", "ACTION", Actions.STRIKE_LANDED),
-    GameEvent("e3", "2026-09-27T10:00:02Z", GameTypes.MMA, "m1", "p1", "ACTION", Actions.STRIKE_ATTEMPT),
+object AnalyticsServer extends cask.MainRoutes:
+
+  // Almacenamiento en memoria para los eventos recibidos
+  private val eventLog = ListBuffer[GameEvent]()
+
+  // Endpoint para recibir e ingestar eventos en JSON
+  @cask.post("/events")
+  def receiveEvent(request: Request) =
+    try
+      val jsonStr = request.text()
+      val event = GameEvent.fromJson(jsonStr)
+      eventLog.append(event)
+      cask.Response(
+        data = ujson.Obj("status" -> "success", "eventId" -> event.eventId).render(),
+        statusCode = 200,
+        headers = Seq("Content-Type" -> "application/json")
+      )
+    catch
+      case e: Exception =>
+        cask.Response(
+          data = ujson.Obj("status" -> "error", "message" -> e.getMessage).render(),
+          statusCode = 400,
+          headers = Seq("Content-Type" -> "application/json")
+        )
+
+  // Endpoint para consultar los patrones detectados
+  @cask.get("/patterns")
+  def getPatterns() =
+    val events = eventLog.toList
+    val thirdParty = PatternDetection.detectThirdPartyEliminations(events)
+    val tikiTaka   = PatternDetection.detectTikiTakaGoals(events)
     
-    // Free Fire Events
-    GameEvent("e4", "2026-09-27T10:05:00Z", GameTypes.FREE_FIRE, "m2", "p1", "ACTION", Actions.DAMAGE_DEALT, Some(EventData(damage = Some(120.0)))),
-    GameEvent("e5", "2026-09-27T10:05:05Z", GameTypes.FREE_FIRE, "m2", "p1", "ACTION", Actions.PLAYER_ELIMINATED, Some(EventData(victimId = Some("p2"))))
-  )
+    cask.Response(
+      data = ujson.Obj(
+        "thirdPartyEliminations" -> thirdParty,
+        "tikiTakaGoals"          -> tikiTaka
+      ).render(),
+      statusCode = 200,
+      headers = Seq("Content-Type" -> "application/json")
+    )
 
-  println("=========================================")
-  println("APARTADO 1.2: METRICAS AGREGADAS EN SCALA 3")
-  println("=========================================")
+  // Endpoint de estado/salud
+  @cask.get("/health")
+  def health() =
+    cask.Response(
+      data = ujson.Obj("status" -> "UP", "totalEvents" -> eventLog.length).render(),
+      statusCode = 200,
+      headers = Seq("Content-Type" -> "application/json")
+    )
 
-  val mmaStats = AggregatedMetrics.mmaPrecisionRate(sampleEvents)
-  println(s"Efectividad de golpeo MMA (p1): ${mmaStats.getOrElse("p1", 0.0)}%")
-
-  val brStats = AggregatedMetrics.freeFirePlayerStats(sampleEvents)
-  val p1Stats = brStats.getOrElse("p1", AggregatedMetrics.PlayerBRStats(0, 0))
-  println(s"Free Fire Jugador p1 - K/D: ${p1Stats.kdRatio} | Danio Total: ${p1Stats.totalDamage}")
-  println("=========================================")
+  initialize()
