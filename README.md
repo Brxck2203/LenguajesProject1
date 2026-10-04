@@ -92,3 +92,30 @@ docker compose down
 
 ``
 <FollowUp label="¿Quieres que guardemos este contenido directamente en un archivo README.md usando PowerShell?" query="Ejecuta el comando para crear o sobrescribir el archivo README.md con la documentación generada."/>
+
+
+---
+
+## 🚫 Archivos y Módulos que NO se deben modificar (Scala 3 & Docker)
+
+Para mantener la estabilidad de la arquitectura de microservicios y la comunicación interna en Docker, los siguientes componentes ya están finalizados y **no deben alterarse**:
+
+1. **`src/main/scala/` (Todo el módulo de Scala 3)**[cite: 3]:
+   - **`src/main/scala/Main.scala`**: Servidor HTTP en el puerto `8080`, manejo de JSON y cabeceras CORS[cite: 3].
+   - **`src/main/scala/analytics/AggregatedMetrics.scala`**: Lógica de cálculo funcional para métricas de MMA y Free Fire[cite: 3].
+   - **`src/main/scala/model/`**: Definición de modelos de datos (`GameEvent`, etc.)[cite: 3].
+2. **`Dockerfile` (Raíz)**: Configuración de compilación e inicio para el contenedor de Scala 3 en el puerto `8080`[cite: 3].
+3. **`build.sbt`**: Configuración de dependencias de Scala 3.
+4. **`docker-compose.yml`**: Configuración de la red interna `analytics-net` y nombres DNS (`scala-analytics`)[cite: 3].
+
+---
+
+## ⚠️ Módulo de Trabajo Esperado para Go (`go_service/`)
+
+El desarrollo pendiente debe realizarse **exclusivamente dentro de la carpeta `go_service/`**:
+
+1. **`go_service/main.go`**:
+   - Implementar la lógica de negocio final del microservicio de Go[cite: 3].
+   - Consumir el endpoint de Scala vía HTTP en `http://scala-analytics:8080/analytics`[cite: 3].
+   - Deserializar la respuesta JSON y exponer los endpoints finales requeridos por el proyecto[cite: 3].
+2. **`go_service/Dockerfile`**: Configuración del contenedor para el servicio de Go[cite: 3].
