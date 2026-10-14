@@ -80,6 +80,11 @@ func ValidateEvent(event domain.Event) error {
 	if err != nil {
 		return err
 	}
+	if team, exists := data["teamId"]; exists {
+		if value, ok := team.(string); !ok || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("data.teamId must be a non-empty string")
+		}
+	}
 	return validateActionData(event.Action, data)
 }
 
@@ -120,13 +125,13 @@ func validateActionData(action string, data map[string]any) error {
 		}
 		return nil
 	case domain.ActionLapCompleted:
-		if err := requirePositiveNumber(data, "lapNumber"); err != nil {
+		if err := requirePositiveInteger(data, "lapNumber"); err != nil {
 			return err
 		}
 		if err := requirePositiveNumber(data, "lapTimeMs"); err != nil {
 			return err
 		}
-		return requirePositiveNumber(data, "position")
+		return requirePositiveInteger(data, "position")
 	case domain.ActionDamageDealt:
 		if err := requireNonEmptyString(data, "targetPlayerId"); err != nil {
 			return err
@@ -162,6 +167,17 @@ func requirePositiveNumber(data map[string]any, field string) error {
 	value, ok := data[field].(float64)
 	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
 		return fmt.Errorf("data.%s is required and must be a positive number", field)
+	}
+	return nil
+}
+
+func requirePositiveInteger(data map[string]any, field string) error {
+	if err := requirePositiveNumber(data, field); err != nil {
+		return err
+	}
+	value := data[field].(float64)
+	if math.Trunc(value) != value {
+		return fmt.Errorf("data.%s must be an integer", field)
 	}
 	return nil
 }

@@ -97,6 +97,24 @@ func TestValidateEventRejectsActionForWrongGame(t *testing.T) {
 	}
 }
 
+func TestValidateLapRequiresIntegerOrdinalFields(t *testing.T) {
+	for _, field := range []string{"lapNumber", "position"} {
+		data := map[string]any{"lapNumber": 1, "lapTimeMs": 90500, "position": 1}
+		data[field] = 1.5
+		if err := ValidateEvent(validEvent(domain.GameMotorcycleRacing, domain.TypeAction, domain.ActionLapCompleted, data)); err == nil {
+			t.Errorf("accepted fractional %s", field)
+		}
+	}
+}
+
+func TestOptionalTeamIDMustBeNonEmptyString(t *testing.T) {
+	for _, team := range []any{"", 42, nil} {
+		if err := ValidateEvent(validEvent(domain.GameFootball, domain.TypeAction, domain.ActionGoal, map[string]any{"teamId": team})); err == nil {
+			t.Errorf("accepted invalid teamId %v", team)
+		}
+	}
+}
+
 func TestValidateEventRejectsNonObjectData(t *testing.T) {
 	event := validEvent(domain.GameMMA, domain.TypeAction, domain.ActionStrikeLanded, map[string]any{
 		"targetPlayerId": "fighter_b",
