@@ -1,5 +1,7 @@
 target/
 project/target/
-project/project/
+project/project/target/
 .bsp/
-.metals/
+.bloop/
+.idea/
+*.class

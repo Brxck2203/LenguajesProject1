@@ -1,0 +1,22 @@
+services:
+  scala-analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scala-analytics-service
+    ports:
+      - "8080:8080"
+    restart: always
+
+  go-service:
+    build:
+      context: ./go_service
+      dockerfile: Dockerfile
+    container_name: go-analytics-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SCALA_API_URL=http://scala-analytics:8080/events
+    depends_on:
+      - scala-analytics
+    restart: always
