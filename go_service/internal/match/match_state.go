@@ -16,13 +16,14 @@ const (
 )
 
 type MatchState struct {
-	MatchID    string
-	GameID     string
-	Status     Status
-	Events     []domain.Event
-	PlayerIDs  map[string]struct{}
-	StartedAt  time.Time
-	FinishedAt *time.Time
+	latestTimestamp time.Time
+	MatchID         string
+	GameID          string
+	Status          Status
+	Events          []domain.Event
+	PlayerIDs       map[string]struct{}
+	StartedAt       time.Time
+	FinishedAt      *time.Time
 }
 
 type MatchSnapshot struct {
@@ -49,6 +50,18 @@ func newMatchState(event domain.Event) *MatchState {
 
 func (state *MatchState) addEvent(event domain.Event) {
 	state.Events = append(state.Events, cloneEvent(event))
+	if event.Timestamp.After(state.latestTimestamp) {
+		state.latestTimestamp = event.Timestamp
+	}
+	var participants map[string]json.RawMessage
+	if json.Unmarshal(event.Data, &participants) == nil {
+		for _, key := range []string{"targetPlayerId", "victimId", "receiverPlayerId"} {
+			var playerID string
+			if json.Unmarshal(participants[key], &playerID) == nil && playerID != "" && playerID != domain.SystemPlayerID {
+				state.PlayerIDs[playerID] = struct{}{}
+			}
+		}
+	}
 	if event.PlayerID != domain.SystemPlayerID {
 		state.PlayerIDs[event.PlayerID] = struct{}{}
 	}

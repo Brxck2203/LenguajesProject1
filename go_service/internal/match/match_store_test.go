@@ -63,6 +63,33 @@ func TestStoreRejectsActionBeforeMatchStarted(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsImpossibleTimelineWithoutConsumingEvent(t *testing.T) {
+	store := NewStore()
+	start := matchEvent("start", "timeline", domain.TypeMatch, domain.ActionMatchStarted, domain.SystemPlayerID, domain.GameFreeFire, map[string]any{})
+	store.Add(start)
+	event := matchEvent("damage", "timeline", domain.TypeAction, domain.ActionDamageDealt, "p1", domain.GameFreeFire, map[string]any{"targetPlayerId": "p2", "damage": 10})
+	event.Timestamp = start.Timestamp.Add(-time.Second)
+	if _, err := store.Add(event); !errors.Is(err, ErrInvalidTimeline) {
+		t.Fatalf("event before start: %v", err)
+	}
+	event.Timestamp = start.Timestamp.Add(time.Second)
+	if _, err := store.Add(event); err != nil {
+		t.Fatal(err)
+	}
+	finish := matchEvent("finish", "timeline", domain.TypeMatch, domain.ActionMatchFinished, domain.SystemPlayerID, domain.GameFreeFire, map[string]any{})
+	if _, err := store.Add(finish); !errors.Is(err, ErrInvalidTimeline) {
+		t.Fatalf("early finish: %v", err)
+	}
+	finish.Timestamp = event.Timestamp
+	if _, err := store.Add(finish); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := store.Get("timeline")
+	if !reflect.DeepEqual(snapshot.PlayerIDs, []string{"p1", "p2"}) {
+		t.Fatalf("target missing: %v", snapshot.PlayerIDs)
+	}
+}
+
 func TestStoreRejectsDuplicateEventID(t *testing.T) {
 	store := NewStore()
 	start := matchEvent("shared_id", "match_001", domain.TypeMatch, domain.ActionMatchStarted, domain.SystemPlayerID, domain.GameFreeFire, map[string]any{})
@@ -126,7 +153,7 @@ func TestStoreSnapshotPlayerIDsAreSorted(t *testing.T) {
 	if !ok {
 		t.Fatal("expected match snapshot")
 	}
-	expected := []string{"player_a", "player_m", "player_z"}
+	expected := []string{"player_a", "player_m", "player_z", "receiver"}
 	if !reflect.DeepEqual(snapshot.PlayerIDs, expected) {
 		t.Fatalf("snapshot.PlayerIDs = %v, want %v", snapshot.PlayerIDs, expected)
 	}

@@ -1,121 +1,89 @@
-# Scala 3 & Go Analytics Microservices Platform
+# GameStats — Go y Scala
 
-Este proyecto es una plataforma de microservicios orquestada con **Docker Compose** que procesa eventos de videojuegos (MMA y Free Fire) para calcular métricas agregadas y exponerlas mediante un proxy HTTP.
+Go recibe y valida eventos de MMA, fútbol, motociclismo y Free Fire, conserva partidas en memoria y envía cada partida cerrada a Scala. Scala debe calcular las estadísticas y detectar patrones.
 
----
+**Estado actual:** el flujo Go, el simulador y su configuración Docker están integrados. Scala conserva su implementación actual: `/analytics` devuelve un ejemplo fijo; todavía falta implementar `POST /analyze` con el [contrato de integración](go_service/docs/scala_contract.md). Por ello se pueden generar y consultar partidas reales en Go, pero sus análisis quedan `FAILED` hasta adaptar Scala. `health: ok` solo confirma que el servidor responde.
 
-## 🛠️ Arquitectura y Estado del Proyecto
+## Probar desde Docker Desktop
 
-| Componente | Tecnología | Puerto Interno / Externo | Estado | Descripción |
-| :--- | :--- | :---: | :---: | :--- |
-| **Scala Analytics Service** | Scala 3.3 / Java JDK HttpServer | `8080:8080` | **100% Completado** | Procesa los eventos de juego, calcula métricas agregadas y expone una API REST en JSON con soporte CORS. |
-| **Go Proxy Service** | Go 1.22 | `8081:8081` | **Estructura Base / En Proceso** | Actúa como gateway/proxy que consulta internamente al servicio de Scala vía DNS de Docker. |
-| **Orquestación** | Docker Compose | N/A | **100% Completado** | Mantiene la red interna `analytics-net` e interconecta los contenedores. |
+Abre Docker Desktop y una consola en la raíz del repositorio. No necesitas instalar Go para estos pasos.
 
----
-
-## ⚙️ Lo que se ha realizado (Módulo Scala 3 & Docker)
-
-1. **Cálculo de Métricas Agregadas (`AggregatedMetrics`)**:
-   - **MMA (`mmaPrecisionRate`)**: Proporción de golpes conectados (`STRIKE_LANDED`) sobre intentos (`STRIKE_ATTEMPT`)[cite: 3].
-   - **Free Fire (`freeFirePlayerStats`)**: Acumulado de daño total y proporción K/D (Kills/Deaths)[cite: 3].
-2. **Servidor HTTP Persistente (`src/main/scala/Main.scala`)**:
-   - Servidor nativo basado en el JDK (`com.sun.net.httpserver.HttpServer`) para evitar incompatibilidades de dependencias[cite: 3].
-   - Bloqueo de hilo con `Thread.currentThread().join()` para asegurar la persistencia en Docker[cite: 3].
-   - Cabeceras **CORS** y soporte para preflight (`OPTIONS`) habilitados para peticiones externas[cite: 3].
-3. **Contrato de API REST en JSON (`http://scala-analytics:8080/analytics`)**:
-   ```json
-   {
-     "playerId": "p1",
-     "mma": {
-       "strikeAccuracyPercentage": 50.0
-     },
-     "freeFire": {
-       "kdRatio": 1.0,
-       "totalDamage": 120.0
-     }
-   }
-
+```sh
+git switch main
+git pull --ff-only
+docker compose up -d --build
+docker compose ps
 ```
 
----
+Espera a que Go aparezca `healthy`. La primera compilación de Scala puede tardar. Si un servicio no arranca:
 
-## 📋 Tareas Pendientes para el Servicio en Go (`go_service/`)
-
-* [ ] **Desarrollar la lógica de negocio final en Go** (`go_service/main.go`).
-* [ ] **Consumir la API de Scala** desde el puerto interno enviando peticiones `GET` a `http://scala-analytics:8080/analytics`.
-
-
-* [ ] **Deserializar el JSON** con la estructura correspondiente (`json.Unmarshal`).
-
-
-* [ ] **Persistencia / Base de Datos** (si el proyecto requiere almacenar los resultados en una BD).
-* [ ] **Exponer los endpoints finales** para los clientes o la entrega del proyecto.
-
----
-
-## 🚀 Comandos para Ejecutar el Proyecto
-
-### Requisitos previos
-
-* Tener **Docker Desktop** iniciado y en ejecución.
-
-### 1. Iniciar la infraestructura completa
-
-Abre una terminal de PowerShell en la raíz del proyecto y ejecuta:
-
-```powershell
-docker compose up --build
-
+```sh
+docker compose logs --tail=100 go-service scala-analytics
 ```
 
-### 2. Probar los endpoints desde una segunda terminal
+1. Abre <http://localhost:8081/> para ver las rutas disponibles, y <http://localhost:8081/health> para comprobar Go.
+2. Genera ocho partidas (dos por juego, 73 eventos) desde un contenedor temporal:
 
-```powershell
-# Probar la salud del servicio de Scala
-Invoke-RestMethod -Uri "http://localhost:8080/health" -Method Get
+   ```sh
+   docker compose run --rm simulator
+   ```
 
-# Obtener las métricas JSON directo desde Scala
-Invoke-RestMethod -Uri "http://localhost:8080/analytics" -Method Get
+   El comando imprime los identificadores aceptados. Cada ejecución usa identificadores nuevos. Que termine correctamente significa que Go aceptó los eventos; no que Scala haya calculado resultados.
+3. Abre <http://localhost:8081/matches>. Verás una lista JSON con `matchId`, `summaryUrl` y `analysisUrl`. Antes de simular, la lista está vacía.
+4. Copia una `summaryUrl` y agrégala a `http://localhost:8081` para ver juego, participantes, cantidad de eventos y estado de la partida. Haz lo mismo con `analysisUrl` para ver estado del análisis, intentos, error o resultado.
 
-# Obtener las métricas a través del Proxy en Go
-(Invoke-RestMethod -Uri "http://localhost:8081/scala-metrics" -Method Get) | ConvertTo-Json -Depth 5
+Para usar un identificador predecible (cámbialo al repetir en la misma sesión):
 
+```sh
+docker compose run --rm simulator -url http://go-service:8081 -prefix demo_01
 ```
 
-### 3. Detener los contenedores
+Entonces abre:
+
+- <http://localhost:8081/matches/demo_01_FREE_FIRE_1>
+- <http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis>
+
+`FINISHED` significa que Go cerró la partida. `COMPLETED` significa que Scala devolvió un resultado compatible. Con el Scala actual se espera `FAILED` y un error HTTP 404 para `/analyze`; no es un error de DNS ni prueba de que se perdieran los eventos.
+
+## Qué se puede ver en Scala
+
+- <http://localhost:8080/health>: salud del servidor Scala.
+- <http://localhost:8080/analytics>: métricas de datos fijos de ejemplo, **no de las partidas enviadas por Go**.
+- `http://localhost:8080/` puede seguir devolviendo 404 porque Scala no define una página inicial.
+
+No hay una interfaz gráfica: las consultas muestran JSON. El antiguo proxy Go `/scala-metrics` se retiró; para ver ese mismo ejemplo utiliza directamente `/analytics` en el puerto 8080. El ejecutable Go actual es `cmd/server`, no el antiguo `go_service/main.go`.
+
+## Cuando Scala implemente el contrato
+
+Compose ya configura `SCALA_ANALYSIS_URL=http://scala-analytics:8080/analyze`. Reconstruye **solo Scala**, conservando el proceso Go y sus datos:
+
+```sh
+docker compose up -d --build --no-deps scala-analytics
+```
+
+Luego, en PowerShell, reintenta una partida fallida:
 
 ```powershell
+Invoke-RestMethod -Method Post http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis/retry
+Invoke-RestMethod http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis | ConvertTo-Json -Depth 20
+```
+
+También puedes crear nuevas partidas y esperar resultados compatibles:
+
+```sh
+docker compose run --rm simulator -url http://go-service:8081 -wait
+```
+
+No uses `-wait` como prueba exitosa del Scala actual: termina con error al detectar un análisis fallido. Los errores transitorios tienen reintentos automáticos; un 404 requiere corregir la API y reintentar manualmente.
+
+## Detener y limitaciones
+
+```sh
 docker compose down
-
 ```
 
-``
-<FollowUp label="¿Quieres que guardemos este contenido directamente en un archivo README.md usando PowerShell?" query="Ejecuta el comando para crear o sobrescribir el archivo README.md con la documentación generada."/>
+Los datos son **solo en memoria**: reiniciar o recrear Go elimina partidas, resultados y eventos. No hay base de datos ni volumen persistente. El healthcheck de Go no certifica disponibilidad ni compatibilidad de Scala.
 
+La implementación Go cuenta con pruebas unitarias, HTTP y de concurrencia; sus pruebas de integración utilizan un servidor Scala simulado. La construcción y ejecución conjunta de los contenedores reales queda por verificar en un entorno con Docker; tampoco se han validado métricas reales de Scala con estos lotes.
 
----
-
-## 🚫 Archivos y Módulos que NO se deben modificar (Scala 3 & Docker)
-
-Para mantener la estabilidad de la arquitectura de microservicios y la comunicación interna en Docker, los siguientes componentes ya están finalizados y **no deben alterarse**:
-
-1. **`src/main/scala/` (Todo el módulo de Scala 3)**[cite: 3]:
-   - **`src/main/scala/Main.scala`**: Servidor HTTP en el puerto `8080`, manejo de JSON y cabeceras CORS[cite: 3].
-   - **`src/main/scala/analytics/AggregatedMetrics.scala`**: Lógica de cálculo funcional para métricas de MMA y Free Fire[cite: 3].
-   - **`src/main/scala/model/`**: Definición de modelos de datos (`GameEvent`, etc.)[cite: 3].
-2. **`Dockerfile` (Raíz)**: Configuración de compilación e inicio para el contenedor de Scala 3 en el puerto `8080`[cite: 3].
-3. **`build.sbt`**: Configuración de dependencias de Scala 3.
-4. **`docker-compose.yml`**: Configuración de la red interna `analytics-net` y nombres DNS (`scala-analytics`)[cite: 3].
-
----
-
-## ⚠️ Módulo de Trabajo Esperado para Go (`go_service/`)
-
-El desarrollo pendiente debe realizarse **exclusivamente dentro de la carpeta `go_service/`**:
-
-1. **`go_service/main.go`**:
-   - Implementar la lógica de negocio final del microservicio de Go[cite: 3].
-   - Consumir el endpoint de Scala vía HTTP en `http://scala-analytics:8080/analytics`[cite: 3].
-   - Deserializar la respuesta JSON y exponer los endpoints finales requeridos por el proyecto[cite: 3].
-2. **`go_service/Dockerfile`**: Configuración del contenedor para el servicio de Go[cite: 3].
+Consulta el [README de Go](go_service/README.md) para arquitectura, variables, API, simulación local y pruebas. El [contrato Go–Scala](go_service/docs/scala_contract.md) describe los campos y respuestas pendientes de implementar en Scala.
