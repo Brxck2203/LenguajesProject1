@@ -200,9 +200,9 @@ func TestGetMissingMatch(t *testing.T) {
 	}
 }
 
-func TestMissingMatchIDAndExtraJSON(t *testing.T) {
+func TestMatchIndexAndExtraJSON(t *testing.T) {
 	for _, path := range []string{"/matches", "/matches/"} {
-		if recorder := newTestRequest(http.MethodGet, path, "", ""); recorder.Code != http.StatusBadRequest {
+		if recorder := newTestRequest(http.MethodGet, path, "", ""); recorder.Code != http.StatusOK {
 			t.Errorf("%s = %d", path, recorder.Code)
 		}
 	}
@@ -223,6 +223,43 @@ func TestInvalidMethodsReturnMethodNotAllowed(t *testing.T) {
 		recorder := newTestRequest(testCase.method, testCase.path, "", "")
 		if recorder.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s %s status = %d, want %d", testCase.method, testCase.path, recorder.Code, http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func TestDiscoverMatchesAndFollowSummary(t *testing.T) {
+	router := NewRouter(match.NewStore(), nil)
+	for _, id := range []string{"z_last", "a_first"} {
+		body := strings.ReplaceAll(eventJSON(id, "MATCH_STARTED", "MATCH", "SYSTEM", `{}`), `"matchId":"match_001"`, `"matchId":"`+id+`"`)
+		req := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("ingestion: %s", rec.Body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/matches", nil))
+	response := decodeResponse(t, rec)
+	if response["count"] != float64(2) {
+		t.Fatalf("index: %v", response)
+	}
+	items := response["matches"].([]any)
+	first := items[0].(map[string]any)
+	if first["matchId"] != "a_first" || first["analysisUrl"] != "/matches/a_first/analysis" {
+		t.Fatalf("first: %v", first)
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, first["summaryUrl"].(string), nil))
+	if rec.Code != http.StatusOK || decodeResponse(t, rec)["eventCount"] != float64(1) {
+		t.Fatalf("summary: %s", rec.Body)
+	}
+	for _, path := range []string{"/", "/matches", "/matches/"} {
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != "GET" {
+			t.Fatalf("method %s: %d", path, rec.Code)
 		}
 	}
 }

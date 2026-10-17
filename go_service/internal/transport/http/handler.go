@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -309,4 +310,38 @@ func decodeErrorMessage(err error) string {
 		return "request body must not exceed 1 MB"
 	}
 	return err.Error()
+}
+
+func (handler *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service":   "GameStats Go",
+		"health":    "/health",
+		"matches":   "/matches",
+		"ingestion": "POST /events or POST /events/batch",
+		"note":      "Run the simulator to create matches. Health does not verify Scala; query each analysis URL for its status.",
+	})
+}
+
+func (handler *Handler) handleMatches(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	type item struct {
+		MatchID     string `json:"matchId"`
+		SummaryURL  string `json:"summaryUrl"`
+		AnalysisURL string `json:"analysisUrl"`
+	}
+	items := make([]item, 0)
+	for _, id := range handler.store.MatchIDs() {
+		path := "/matches/" + url.PathEscape(id)
+		items = append(items, item{MatchID: id, SummaryURL: path, AnalysisURL: path + "/analysis"})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"matches": items, "count": len(items)})
 }

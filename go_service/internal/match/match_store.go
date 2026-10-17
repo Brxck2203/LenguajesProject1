@@ -112,3 +112,15 @@ func (store *Store) ActiveCount() int {
 	}
 	return active
 }
+
+// MatchIDs returns an ordered copy without copying the event histories.
+func (store *Store) MatchIDs() []string {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	ids := make([]string, 0, len(store.matches))
+	for id := range store.matches {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}

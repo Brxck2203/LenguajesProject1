@@ -224,3 +224,9 @@ func (service *Service) finish(matchID string, result *domain.AnalysisResult, er
 	}
 	service.active--
 }
+
+func (service *Service) MatchIDs() []string {
+	service.mu.RLock()
+	defer service.mu.RUnlock()
+	return service.store.MatchIDs()
+}

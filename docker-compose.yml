@@ -1,0 +1,44 @@
+services:
+  scala-analytics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scala-analytics-service
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  go-service:
+    build:
+      context: ./go_service
+      dockerfile: Dockerfile
+    image: lenguajesproject1-go
+    container_name: go-analytics-service
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      SCALA_ANALYSIS_URL: http://scala-analytics:8080/analyze
+    depends_on:
+      - scala-analytics
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  simulator:
+    profiles: ["demo"]
+    image: lenguajesproject1-go
+    build:
+      context: ./go_service
+      dockerfile: Dockerfile
+    entrypoint: ["/app/simulator"]
+    command: ["-url", "http://go-service:8081"]
+    depends_on:
+      go-service:
+        condition: service_healthy
+    restart: "no"

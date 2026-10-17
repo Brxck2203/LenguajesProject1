@@ -100,6 +100,8 @@ Estos escenarios proveen datos para demostrar las futuras métricas y patrones S
 | GET | `/health` | 200: salud del proceso Go; no verifica Scala |
 | POST | `/events` | 202: evento aceptado |
 | POST | `/events/batch` | 202: lote aceptado; detención parcial ante error |
+| GET | `/` | 200: índice de rutas |
+| GET | `/matches` | 200: partidas con enlaces a resumen y análisis |
 | GET | `/matches/{matchId}` | 200: resumen sin todos los eventos |
 | GET | `/matches/{matchId}/analysis` | 200: estado y, si existe, resultado |
 | POST | `/matches/{matchId}/analysis/retry` | 202: nuevo ciclo para un análisis `FAILED`; sin body |
@@ -232,21 +234,18 @@ PORT=8081 SCALA_ANALYSIS_URL=http://localhost:8080/analyze go run ./cmd/server
 
 ## Docker del módulo Go
 
-Desde la raíz del repositorio:
+Desde la raíz del repositorio, con Docker Desktop iniciado:
 
 ```sh
-docker build -t gamestats-go ./go_service
+docker compose up -d --build
+docker compose run --rm simulator
 ```
 
-Cuando exista un servicio Scala compatible y ambos contenedores estén conectados a la misma red Docker:
+Abre `http://localhost:8081/matches` y consulta las rutas `summaryUrl` y `analysisUrl` de cada partida. La raíz `http://localhost:8081/` muestra el índice de la API. Son respuestas JSON, no una interfaz gráfica.
 
-```sh
-docker run --rm --name gamestats-go --network analytics-net -p 8081:8081 -e SCALA_ANALYSIS_URL=http://scala-analytics:8080/analyze gamestats-go
-```
+La imagen compila `./cmd/server` y `./cmd/simulator`, usa binarios sin CGO y un usuario sin privilegios. Compose apunta a `http://scala-analytics:8080/analyze`; `localhost` dentro de Go no apunta al contenedor Scala. El simulador espera a que Go esté saludable y no espera análisis por defecto.
 
-La red debe existir y `scala-analytics` debe ser un nombre o alias resoluble en ella. `localhost` dentro del contenedor Go no apunta al contenedor Scala. La configuración Compose conjunta se completará con Scala; no se incluye ni modifica en este trabajo.
-
-La imagen compila `./cmd/server`, ejecuta un binario sin CGO con usuario sin privilegios y contiene certificados para HTTPS. No usa un segundo `main.go` en la raíz de `go_service`.
+**El Scala actual aún no tiene `/analyze`: se espera `FAILED` con HTTP 404.** Sus ejemplos se consultan directamente en `http://localhost:8080/analytics`. El antiguo proxy `/scala-metrics` y su `main.go` raíz fueron retirados para mantener un único servidor Go. Consulta el [procedimiento completo](../README.md) para reintentar análisis después de adaptar Scala sin reiniciar Go ni perder sus datos.
 
 ## Verificación
 
@@ -270,5 +269,4 @@ Si un entorno de revisión no permite consultar los metadatos Git durante `go bu
 
 - Adaptar Scala al contrato documentado y verificar las estadísticas y patrones con estos escenarios.
 - Probar ambos servicios reales y construir/ejecutar sus contenedores.
-- Integrar Compose, CI/CD y deployment del proyecto completo.
-- Actualizar el README raíz cuando la arquitectura integrada esté confirmada.
+- Completar CI/CD y deployment del proyecto completo. Compose y el README raíz ya incluyen el flujo Go y el simulador.

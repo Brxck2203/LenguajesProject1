@@ -10,6 +10,7 @@ import (
 type EventStore interface {
 	Add(domain.Event) (*domain.AnalysisRequest, error)
 	Get(string) (match.MatchSnapshot, bool)
+	MatchIDs() []string
 }
 type AnalysisService interface {
 	Analysis(string) (domain.AnalysisSnapshot, bool)
@@ -25,11 +26,9 @@ func NewRouter(store EventStore, analysis AnalysisService) http.Handler {
 	mux.HandleFunc("/matches/{matchId}", handler.handleMatchByID)
 	mux.HandleFunc("/matches/{matchId}/analysis", handler.handleAnalysis)
 	mux.HandleFunc("/matches/{matchId}/analysis/retry", handler.handleRetry)
-	missingID := func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusBadRequest, "matchId is required")
-	}
-	mux.HandleFunc("/matches", missingID)
-	mux.HandleFunc("/matches/{$}", missingID)
+	mux.HandleFunc("/matches", handler.handleMatches)
+	mux.HandleFunc("/matches/{$}", handler.handleMatches)
+	mux.HandleFunc("/{$}", handler.handleIndex)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "endpoint not found") })
 	return mux
 }
