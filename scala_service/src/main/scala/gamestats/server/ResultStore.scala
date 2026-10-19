@@ -5,6 +5,7 @@ import gamestats.model.AnalysisResult
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, StandardCopyOption}
+import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
@@ -79,6 +80,10 @@ final class ResultStore(directory: Option[Path]):
         val target = dir.resolve(ResultStore.fileName(stored.result.matchId))
         val temporary = Files.createTempFile(dir, ".result-", ".tmp")
         Files.writeString(temporary, ujson.write(stored.toJson, indent = 2), StandardCharsets.UTF_8)
+        // createTempFile defaults to 0600 on Linux. Published game results must
+        // also be readable by the host user and the CI artifact collector.
+        if Files.getFileStore(temporary).supportsFileAttributeView("posix") then
+          Files.setPosixFilePermissions(temporary, PosixFilePermissions.fromString("rw-r--r--"))
         Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
       }.failed.foreach(error => println(s"[scala] no se pudo guardar ${stored.result.matchId}: $error"))
     }

@@ -7,6 +7,7 @@ import gamestats.model.Actions.*
 import gamestats.server.*
 
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermission
 
 class JsonCodecSuite extends munit.FunSuite:
   private val valid = MatchBuilder(Games.FreeFire, "ff1").start
@@ -106,7 +107,12 @@ class ApiSuite extends munit.FunSuite:
     val dir = Files.createTempDirectory("gamestats-results")
     val first = Api(ResultStore(Some(dir)))
     assertEquals(post(first, toJson(batch)).status, 200)
-    assert(Files.exists(dir.resolve("mma1.json")))
+    val persisted = dir.resolve("mma1.json")
+    assert(Files.exists(persisted))
+    if Files.getFileStore(persisted).supportsFileAttributeView("posix") then
+      val permissions = Files.getPosixFilePermissions(persisted)
+      assert(permissions.contains(PosixFilePermission.GROUP_READ))
+      assert(permissions.contains(PosixFilePermission.OTHERS_READ))
 
     val restarted = ResultStore(Some(dir))
     assertEquals(restarted.loadFromDisk(), (1, Nil))
