@@ -21,20 +21,29 @@ var (
 )
 
 type Store struct {
-	mu       sync.RWMutex
-	matches  map[string]*MatchState
-	eventIDs map[string]struct{}
+	mu        sync.RWMutex
+	matches   map[string]*MatchState
+	eventIDs  map[string]struct{}
+	validator *validation.Validator
 }
 
-func NewStore() *Store {
+// NewStore validates events with the embedded default catalog.
+func NewStore() *Store { return NewStoreWithValidator(validation.Default()) }
+
+// NewStoreWithValidator uses a catalog loaded from configuration.
+func NewStoreWithValidator(validator *validation.Validator) *Store {
+	if validator == nil {
+		validator = validation.Default()
+	}
 	return &Store{
-		matches:  make(map[string]*MatchState),
-		eventIDs: make(map[string]struct{}),
+		matches:   make(map[string]*MatchState),
+		eventIDs:  make(map[string]struct{}),
+		validator: validator,
 	}
 }
 
 func (store *Store) Add(event domain.Event) (*domain.AnalysisRequest, error) {
-	if err := validation.ValidateEvent(event); err != nil {
+	if err := store.validator.Validate(event); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 

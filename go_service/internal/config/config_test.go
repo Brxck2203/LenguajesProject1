@@ -7,7 +7,7 @@ func TestInvalidEnvironmentIsRejected(t *testing.T) {
 		{"PORT", "70000"}, {"PORT", ""}, {"SCALA_TIMEOUT", "0s"},
 		{"SHUTDOWN_TIMEOUT", "bad"}, {"ANALYSIS_CAPACITY", "0"},
 		{"ANALYSIS_WORKERS", "-1"}, {"ANALYSIS_MAX_ATTEMPTS", "a"},
-		{"ANALYSIS_RETRY_MAX", "1ns"},
+		{"ANALYSIS_RETRY_MAX", "1ns"}, {"INBOX_WORKERS", "0"}, {"INBOX_POLL_INTERVAL", "-1s"},
 	} {
 		t.Run(tc.name+tc.value, func(t *testing.T) {
 			t.Setenv(tc.name, tc.value)

@@ -1,272 +1,121 @@
-# GameStats — Servicio Go
+# GameStats — módulo Go (ingestión y control del flujo)
 
-Go recibe eventos simulados, valida su contrato, reconstruye partidas en memoria y envía cada partida cerrada a Scala para su análisis. Las estadísticas y los patrones se calculan exclusivamente en Scala.
-
-## Estado del módulo
-
-| Componente | Estado |
-|---|---|
-| API HTTP de ingestión individual y batch | Implementada |
-| Validación y estado de partidas en memoria | Implementados |
-| Simulación concurrente de cuatro juegos | Implementada: ocho partidas por ejecución |
-| Cola, workers y reintentos de análisis | Implementados |
-| Cliente HTTP y verificación de respuesta Scala | Implementados |
-| Consulta de análisis y reintento manual | Implementados |
-| Apagado controlado por SIGINT/SIGTERM | Implementado |
-| Dockerfile propio de Go | Incluido; ejecución Docker pendiente de verificar |
-| Integración con el Scala actual del repositorio | Pendiente de adaptar Scala al contrato |
-
-**Go funciona sin Scala para recibir y consultar partidas.** En ese caso, el análisis quedará en `RETRYING` y finalmente `FAILED`. Esto no impide consultar la partida ni conserva falsos resultados. Una vez disponible un Scala compatible, se pueden reintentar los lotes fallidos sin reabrir las partidas, mientras el proceso Go siga vivo.
-
-La definición vigente para el próximo trabajo de Scala está en [el contrato de integración](docs/scala_contract.md). El README raíz describe otra propuesta de integración y no sustituye las instrucciones de este módulo.
+Recibe eventos simulados o de la consola de juegos por HTTP o por archivos, los valida contra el catálogo, reconstruye las partidas en memoria y envía cada partida cerrada a Scala para analizarla. **Go no calcula estadísticas**: transporta el lote y guarda el resultado que devuelve Scala.
 
 ## Recorrido de una partida
 
-1. Un productor envía `MATCH_STARTED`, acciones y `MATCH_FINISHED` a Go.
-2. Go valida y agrupa por `matchId`; el historial conserva el orden de llegada.
-3. El cierre crea una copia ordenada establemente por timestamp y registra el trabajo de análisis.
-4. Un worker envía el lote mediante `POST` a `SCALA_ANALYSIS_URL`.
-5. Go valida la identidad y estructura del resultado y lo mantiene en memoria.
-6. El cliente consulta el resumen de partida y el estado o resultado del análisis.
+1. Un productor envía `MATCH_STARTED`, las acciones y `MATCH_FINISHED`, por `POST /events`, `POST /events/batch` o como archivos en `INBOX_DIR`.
+2. Go valida cada evento con el catálogo (`internal/validation/event_catalog.json`), rechaza duplicados y eventos fuera del ciclo de vida, y los agrupa por `matchId`.
+3. Al cerrar la partida, crea una copia ordenada por `timestamp` y registra el trabajo de análisis en una cola con capacidad limitada.
+4. Un worker envía el lote a `SCALA_ANALYSIS_URL` (`POST /analyze`) y reintenta los fallos transitorios.
+5. Go verifica la identidad y la estructura del resultado y lo deja disponible en `/matches/{id}/analysis`.
 
-El productor usa una goroutine por partida y espera cada respuesta antes de enviar el siguiente evento de esa partida. Varias partidas avanzan simultáneamente. La API recibe peticiones concurrentes, el estado usa mutex y el envío a Scala utiliza un channel y workers. Las llamadas de red se realizan fuera de los bloqueos de memoria.
+## Concurrencia
+
+| Componente | Mecanismo |
+|---|---|
+| API HTTP | `net/http` atiende cada petición en su goroutine; el estado de las partidas usa `sync.RWMutex` |
+| Bandeja de archivos (`internal/inbox`) | Un goroutine *dispatcher* lee la carpeta en orden y separa cada archivo por `matchId`; N workers con un channel cada uno. La partición por hash del `matchId` mantiene el orden dentro de cada partida y procesa partidas distintas en paralelo |
+| Análisis (`internal/processing`) | Channel con capacidad `ANALYSIS_CAPACITY` y `ANALYSIS_WORKERS` goroutines; las llamadas de red ocurren fuera de los bloqueos |
+| Simulador (`internal/simulation`) | Una goroutine por partida; partidas de los cuatro juegos avanzan a la vez |
+| Apagado | SIGINT/SIGTERM: primero se deja de leer la bandeja, luego se cierra HTTP y se vacía la cola de análisis |
 
 ## Estructura
 
 | Ruta | Responsabilidad |
 |---|---|
-| `cmd/server/main.go` | Inicio HTTP, configuración y apagado controlado |
-| `cmd/simulator/main.go` | Comando para generar tráfico concurrente |
-| `internal/domain/` | Eventos, lotes, estados y resultados de análisis |
-| `internal/validation/` | Validación del sobre y datos mínimos por acción |
-| `internal/match/` | Estado temporal, duplicados, participantes y ciclo de vida |
-| `internal/processing/` | Registro atómico del cierre y lote, cola, workers y reintentos |
-| `internal/scala/` | Cliente escrito en Go para llamar a Scala |
-| `internal/simulation/` | Escenarios y productor HTTP |
-| `internal/transport/http/` | Rutas, códigos HTTP y respuestas JSON |
-| `internal/config/` | Lectura y validación de variables de entorno |
-| `docs/scala_contract.md` | Contrato que deberá implementar Scala |
-
-## Ejecución local
-
-Requisito: Go 1.22 o posterior. El módulo utiliza la biblioteca estándar y no requiere base de datos.
-
-Desde la raíz del repositorio, primera terminal:
-
-```sh
-cd go_service
-go run ./cmd/server
-```
-
-Go escucha en `http://localhost:8081`. Su URL de análisis por defecto es `http://localhost:8080/analyze`.
-
-En otra terminal, también dentro de `go_service`:
-
-```sh
-go run ./cmd/simulator
-```
-
-El comando imprime los `matchId` generados. Cada ejecución usa un prefijo nuevo para no colisionar con IDs existentes.
-
-Para IDs conocidos durante una demostración:
-
-```sh
-go run ./cmd/simulator -prefix demo_01 -interval 25ms
-```
-
-No reutilizar el mismo prefijo contra un proceso que ya recibió esas partidas. Solo cuando Scala implemente el contrato, agregar `-wait` para verificar también la finalización del análisis:
-
-```sh
-go run ./cmd/simulator -prefix demo_02 -wait -timeout 2m
-```
-
-`-url` cambia el destino Go; `-interval` controla la separación entre envíos de cada partida. Las marcas de tiempo de los eventos son simuladas y no dependen de esa velocidad. El simulador espera y reintenta respuestas 503 hasta 30 intentos por evento; ante otros errores se detiene para esa partida y termina con código distinto de cero. No reenvía automáticamente una petición cuyo resultado de red sea incierto.
-
-## Escenarios disponibles
-
-| Juego | Partida 1 | Partida 2 |
-|---|---|---|
-| MMA | Golpes próximos, knockdown y detención | Golpes separados, sin knockdown |
-| FOOTBALL | Cinco pases completos del mismo equipo y gol | Secuencia interrumpida y pase incompleto |
-| MOTORCYCLE_RACING | Accidente y recuperación de posiciones | Parada sin recuperación al primer lugar |
-| FREE_FIRE | Daño de A a B y eliminación de B por C | El mismo atacante daña y elimina |
-
-Estos escenarios proveen datos para demostrar las futuras métricas y patrones Scala. Go no determina si el patrón se cumple. Los casos de entrada inválida, duplicados, saturación y fallos de Scala están cubiertos por las pruebas automatizadas.
+| `cmd/server` | Configuración, servidor HTTP, bandeja y apagado controlado |
+| `cmd/simulator` | Fuente de eventos simulada (HTTP o archivos; guionada o aleatoria; continua) |
+| `internal/domain` | Sobre de eventos, lotes, estados y resultados |
+| `internal/validation` | Catálogo de eventos (JSON embebido o `EVENT_CATALOG_PATH`) y validador |
+| `internal/match` | Estado temporal, duplicados, participantes y ciclo de vida |
+| `internal/processing` | Cierre atómico, cola, workers y reintentos |
+| `internal/inbox` | Ingestión concurrente de archivos `*.json`, `*.jsonl` y `*.ndjson` |
+| `internal/scala` | Cliente HTTP del contrato con Scala |
+| `internal/simulation` | Partidas guionadas, generador aleatorio y productores HTTP y de archivos |
+| `internal/transport/http` | Rutas, códigos HTTP y respuestas JSON |
+| `internal/config` | Lectura y validación de variables de entorno |
 
 ## API HTTP
 
 | Método | Ruta | Respuesta |
 |---|---|---|
-| GET | `/health` | 200: salud del proceso Go; no verifica Scala |
+| GET | `/` | Índice de rutas y juegos del catálogo |
+| GET | `/health` | Salud del proceso Go (no verifica Scala) |
+| GET | `/catalog` | Catálogo de eventos vigente |
+| GET | `/inbox` | Estado de la bandeja de archivos |
 | POST | `/events` | 202: evento aceptado |
-| POST | `/events/batch` | 202: lote aceptado; detención parcial ante error |
-| GET | `/` | 200: índice de rutas |
-| GET | `/matches` | 200: partidas con enlaces a resumen y análisis |
-| GET | `/matches/{matchId}` | 200: resumen sin todos los eventos |
-| GET | `/matches/{matchId}/analysis` | 200: estado y, si existe, resultado |
-| POST | `/matches/{matchId}/analysis/retry` | 202: nuevo ciclo para un análisis `FAILED`; sin body |
+| POST | `/events/batch` | 202: lote `{"events":[...]}` aceptado; si un evento falla se conserva lo anterior y se indica `failedAtIndex` |
+| GET | `/matches` | Partidas con enlaces a resumen y análisis |
+| GET | `/matches/{matchId}` | Resumen: juego, participantes, cantidad de eventos, estado |
+| GET | `/matches/{matchId}/analysis` | Estado del análisis y resultado |
+| POST | `/matches/{matchId}/analysis/retry` | 202: nuevo ciclo para un análisis `FAILED` |
 
-Para `/events` y `/events/batch`: `Content-Type: application/json`, cuerpo máximo de 1 MiB y exactamente un valor JSON. Se rechazan campos desconocidos del sobre; las propiedades adicionales de juego van dentro de `data`.
-
-Evento de ejemplo:
-
-```json
-{
-  "eventId": "demo_start",
-  "timestamp": "2026-10-01T12:00:00Z",
-  "gameId": "FREE_FIRE",
-  "matchId": "demo",
-  "playerId": "SYSTEM",
-  "type": "MATCH",
-  "action": "MATCH_STARTED",
-  "data": {}
-}
-```
-
-Para batch, usar `{"events":[...eventos...]}`. Se decodifica todo el JSON antes de procesar: si el documento no puede decodificarse, se aceptan cero eventos. Si falla la validación o el estado de un evento durante el recorrido, se conserva el prefijo ya aceptado.
-
-La respuesta parcial incluye `accepted`, `failedAtIndex` (índice desde cero), `error` y `readyForAnalysis`. Si una partida cerró antes del error, su análisis queda registrado aunque falle un evento posterior. Al reanudar, enviar desde el evento fallido; no reenviar todo el prefijo aceptado.
-
-El cierre individual devuelve `eventCount`, contando inicio, acciones y fin. `matchStatus=FINISHED` significa partida cerrada; el análisis puede estar todavía pendiente.
-
-### Consultar con PowerShell
-
-Después de ejecutar el simulador con `-prefix demo_01`:
-
-```powershell
-Invoke-RestMethod http://localhost:8081/health
-Invoke-RestMethod http://localhost:8081/matches/demo_01_FREE_FIRE_1
-Invoke-RestMethod http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis | ConvertTo-Json -Depth 20
-```
-
-Tras corregir o iniciar Scala, reintentar una partida que esté en `FAILED`:
-
-```powershell
-Invoke-RestMethod -Method Post http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis/retry
-```
-
-### Enviar una partida corta con PowerShell
-
-```powershell
-$start = @{
-  eventId = 'manual_start'; timestamp = '2026-10-01T12:00:00Z'
-  gameId = 'FREE_FIRE'; matchId = 'manual'; playerId = 'SYSTEM'
-  type = 'MATCH'; action = 'MATCH_STARTED'; data = @{}
-}
-$damage = @{
-  eventId = 'manual_damage'; timestamp = '2026-10-01T12:00:01Z'
-  gameId = 'FREE_FIRE'; matchId = 'manual'; playerId = 'p1'
-  type = 'ACTION'; action = 'DAMAGE_DEALT'
-  data = @{ targetPlayerId = 'p2'; damage = 50 }
-}
-$finish = @{
-  eventId = 'manual_finish'; timestamp = '2026-10-01T12:00:05Z'
-  gameId = 'FREE_FIRE'; matchId = 'manual'; playerId = 'SYSTEM'
-  type = 'MATCH'; action = 'MATCH_FINISHED'; data = @{}
-}
-$body = @{ events = @($start, $damage, $finish) } | ConvertTo-Json -Depth 10
-Invoke-RestMethod -Method Post -Uri http://localhost:8081/events/batch -ContentType 'application/json' -Body $body
-```
-
-### Estados y errores
+| Código | Casos |
+|---|---|
+| 400 | JSON inválido o evento que no cumple el catálogo |
+| 404 | Partida o ruta inexistente |
+| 405 | Método incorrecto (incluye `Allow`) |
+| 409 | Duplicado, conflicto con el ciclo de vida, el juego o el tiempo; análisis no reintentable |
+| 413 | Cuerpo mayor de 1 MiB |
+| 415 | `Content-Type` distinto de `application/json` |
+| 503 | Capacidad de análisis agotada o servicio cerrándose (`Retry-After: 1`) |
 
 | Estado del análisis | Significado |
 |---|---|
-| `QUEUED` | Lote registrado y esperando worker |
+| `QUEUED` | En cola |
 | `PROCESSING` | Petición a Scala en curso |
-| `RETRYING` | Espera antes del siguiente intento automático |
-| `COMPLETED` | Resultado compatible recibido de Scala |
-| `FAILED` | Error permanente o intentos agotados; lote retenido para reintento manual |
+| `RETRYING` | Esperando el siguiente intento automático |
+| `COMPLETED` | Resultado recibido de Scala |
+| `FAILED` | Error permanente o intentos agotados; se puede reintentar manualmente |
 
-La consulta incluye `matchId`, `gameId`, `status`, `eventCount`, `attempts`, `createdAt`, `updatedAt`, `lastError` cuando corresponda y `result` solo al completar. Consultar una partida activa devuelve 409; una inexistente, 404. Un análisis `FAILED` se consulta con HTTP 200 y su estado explícito.
+## Simulador
 
-| Código HTTP | Casos |
-|---|---|
-| 400 | JSON inválido, campos inválidos o falta `matchId` en la consulta |
-| 404 | Partida o ruta inexistente |
-| 405 | Método incorrecto; incluye `Allow` |
-| 409 | Duplicado, conflicto de ciclo de vida/juego/tiempo, análisis no reintentable |
-| 413 | Body entrante mayor de 1 MiB |
-| 415 | Tipo de contenido distinto de `application/json` |
-| 503 | Capacidad agotada o servicio cerrándose; incluye `Retry-After: 1` en errores de ingestión/reintento |
+```sh
+go run ./cmd/simulator                                   # 8 partidas guionadas por HTTP
+go run ./cmd/simulator -scenario random -matches 10 -wait
+go run ./cmd/simulator -mode files -out ../data/inbox -scenario all
+go run ./cmd/simulator -mode files -out ../data/inbox -scenario random -matches 1 -continuous -every 20s -timeout 0
+```
 
-## Garantías y límites del estado
+| Partida guionada | Variante 1 | Variante 2 |
+|---|---|---|
+| MMA | Tres golpes seguidos, knockdown y detención | Golpes separados, sin knockdown |
+| FOOTBALL | Cinco pases completados del mismo equipo y gol | Secuencia cortada por una falta y un pase fallado |
+| MOTORCYCLE_RACING | Caída y recuperación hasta el primer lugar | Parada en boxes sin recuperación |
+| FREE_FIRE | A daña a B y C elimina a B (*third party*) | El mismo atacante daña y elimina |
 
-- El `eventId` es único globalmente durante la vida del proceso.
-- Las partidas solo abren con `MATCH_STARTED`. Un segundo inicio, juego diferente o eventos posteriores al cierre se rechazan.
-- Los participantes incluyen actores, objetivos, víctimas y receptores identificados; `SYSTEM` se excluye. El resumen devuelve sus IDs ordenados.
-- Los datos y resultados se entregan mediante copias defensivas.
-- La capacidad cubre análisis en cola, en ejecución o esperando reintento. **Cuando se llena, un cierre se rechaza antes de modificar la partida o consumir su `eventId`.** Puede reenviarse exactamente ese cierre después. En ese estado, el control de capacidad puede preceder a otros errores del cierre.
-- Los análisis fallidos no ocupan un cupo activo, pero conservan su lote. El reintento manual necesita un cupo.
-- No se descartan lotes por fallo de red o saturación mientras el proceso continúa vivo. La idempotencia completa exige cooperación de Scala.
-- Todo es **en memoria**: reiniciar elimina partidas, IDs, resultados y lotes pendientes/fallidos. No hay persistencia ni limpieza automática del historial; la capacidad limita trabajo activo, no el tamaño total de la memoria.
-- Al recibir SIGINT/SIGTERM, se dejan terminar los handlers y luego se drenan los análisis hasta el plazo configurado. Al vencer, se cancelan las peticiones y se informa la pérdida de estado al salir.
+El generador aleatorio (`-scenario random`) es reproducible con `-seed` y reutiliza grupos fijos de jugadores, así cada uno acumula historial entre partidas. Detalles en [docs/juegos-y-estadisticas.md](../docs/juegos-y-estadisticas.md#5-datos-de-prueba).
 
 ## Configuración
 
-| Variable | Valor por defecto | Uso |
+| Variable | Por defecto | Uso |
 |---|---|---|
-| `PORT` | `8081` | Puerto de Go |
-| `SCALA_ANALYSIS_URL` | `http://localhost:8080/analyze` | URL completa del endpoint compatible |
-| `SCALA_TIMEOUT` | `10s` | Tiempo máximo de cada petición a Scala |
-| `ANALYSIS_WORKERS` | `4` | Workers concurrentes |
-| `ANALYSIS_CAPACITY` | `128` | Máximo de análisis activos |
+| `PORT` | `8081` | Puerto HTTP |
+| `SCALA_ANALYSIS_URL` | `http://localhost:8080/analyze` | Endpoint de Scala |
+| `SCALA_TIMEOUT` | `10s` | Tiempo máximo por petición a Scala |
+| `ANALYSIS_WORKERS` | `4` | Workers de análisis |
+| `ANALYSIS_CAPACITY` | `128` | Análisis activos como máximo |
 | `ANALYSIS_MAX_ATTEMPTS` | `3` | Intentos por ciclo |
-| `ANALYSIS_RETRY_BASE` | `1s` | Espera inicial exponencial |
-| `ANALYSIS_RETRY_MAX` | `10s` | Tope de espera entre intentos |
-| `SHUTDOWN_TIMEOUT` | `30s` | Plazo compartido para apagar HTTP y análisis |
-
-`.env.example` es una referencia; el programa no carga archivos `.env` automáticamente. Se validan puertos, cantidades y duraciones antes de iniciar.
-
-PowerShell:
-
-```powershell
-$env:PORT = '8081'
-$env:SCALA_ANALYSIS_URL = 'http://localhost:8080/analyze'
-go run ./cmd/server
-```
-
-Bash:
-
-```sh
-PORT=8081 SCALA_ANALYSIS_URL=http://localhost:8080/analyze go run ./cmd/server
-```
-
-## Docker del módulo Go
-
-Desde la raíz del repositorio, con Docker Desktop iniciado:
-
-```sh
-docker compose up -d --build
-docker compose run --rm simulator
-```
-
-Abre `http://localhost:8081/matches` y consulta las rutas `summaryUrl` y `analysisUrl` de cada partida. La raíz `http://localhost:8081/` muestra el índice de la API. Son respuestas JSON, no una interfaz gráfica.
-
-La imagen compila `./cmd/server` y `./cmd/simulator`, usa binarios sin CGO y un usuario sin privilegios. Compose apunta a `http://scala-analytics:8080/analyze`; `localhost` dentro de Go no apunta al contenedor Scala. El simulador espera a que Go esté saludable y no espera análisis por defecto.
-
-**El Scala actual aún no tiene `/analyze`: se espera `FAILED` con HTTP 404.** Sus ejemplos se consultan directamente en `http://localhost:8080/analytics`. El antiguo proxy `/scala-metrics` y su `main.go` raíz fueron retirados para mantener un único servidor Go. Consulta el [procedimiento completo](../README.md) para reintentar análisis después de adaptar Scala sin reiniciar Go ni perder sus datos.
+| `ANALYSIS_RETRY_BASE` / `ANALYSIS_RETRY_MAX` | `1s` / `10s` | Espera exponencial entre intentos |
+| `SHUTDOWN_TIMEOUT` | `30s` | Plazo para el apagado controlado |
+| `EVENT_CATALOG_PATH` | (vacío) | Catálogo alternativo; vacío usa el embebido |
+| `INBOX_DIR` | (vacío) | Carpeta de la bandeja; vacío la desactiva (Docker usa `/data/inbox`) |
+| `INBOX_POLL_INTERVAL` | `500ms` | Frecuencia de revisión de la carpeta |
+| `INBOX_WORKERS` | `4` | Workers de la bandeja |
 
 ## Verificación
 
-Desde `go_service`:
-
 ```sh
-gofmt -w .
+gofmt -l .
 go vet ./...
-go test ./...
 go test -race ./...
-go build ./cmd/server ./cmd/simulator
 ```
 
-`go test -race` requiere CGO y un compilador C compatible instalado. La prueba HTTP de integración usa un servidor Scala simulado exclusivamente dentro de los tests; prueba ocho partidas concurrentes, lotes íntegros y ordenados, reintentos 503 con clave estable y consulta de resultados. **No demuestra las métricas ni el funcionamiento de Scala real.**
+Las pruebas cubren la validación y el catálogo (incluido un juego nuevo definido solo por JSON), el estado de las partidas, la cola con reintentos y capacidad llena, el cliente de Scala, la API HTTP con un Scala simulado, el orden y el paralelismo de la bandeja, archivos rechazados con su reporte, y que todas las partidas generadas, guionadas y aleatorias, sean aceptadas.
 
-También se comprueban respuestas incompatibles, timeouts, límites, redirecciones, capacidad llena sin consumir el cierre, recuperación manual, snapshots defensivos, batches parciales y apagado con/sin plazo agotado.
+## Garantías y límites
 
-Si un entorno de revisión no permite consultar los metadatos Git durante `go build`/`go run`, puede utilizarse `-buildvcs=false`. Esta opción solo desactiva la inclusión de metadatos de versión en el binario.
-
-## Pendientes de integración general
-
-- Adaptar Scala al contrato documentado y verificar las estadísticas y patrones con estos escenarios.
-- Probar ambos servicios reales y construir/ejecutar sus contenedores.
-- Completar CI/CD y deployment del proyecto completo. Compose y el README raíz ya incluyen el flujo Go y el simulador.
+- `eventId` es único durante la vida del proceso. Una partida solo abre con `MATCH_STARTED`; después del cierre no se aceptan más eventos.
+- Con la capacidad llena, el cierre se rechaza **antes** de modificar la partida, para que el productor pueda reenviarlo.
+- El estado de Go está en memoria: reiniciar el proceso borra las partidas en curso. El historial persistente lo guarda Scala en `data/results`.

@@ -1,0 +1,90 @@
+# GameStats — despliegue con imágenes ya publicadas por el pipeline (sin compilar nada).
+# Lo usa scripts/install.sh --release y el paquete que genera la etapa de release del CI.
+#
+#   docker compose -f docker-compose.release.yml up -d --wait
+#   docker compose run --rm simulator               # 8 partidas guionadas por HTTP
+#   docker compose run --rm simulator -scenario random -matches 10 -wait
+#   docker compose --profile live up -d             # además, simulador continuo por archivos
+#
+# Las carpetas ./data/inbox (eventos que llegan como archivos) y ./data/results
+# (resultados JSON de Scala) quedan en el disco del equipo anfitrión.
+name: gamestats
+
+x-go-image: &go-image ${IMAGE_REGISTRY:-ghcr.io/brxck2203/lenguajesproject1}/go-service:${GAMESTATS_TAG:-latest}
+
+services:
+  scala-analytics:
+    image: ${IMAGE_REGISTRY:-ghcr.io/brxck2203/lenguajesproject1}/scala-analytics:${GAMESTATS_TAG:-latest}
+    container_name: gamestats-scala
+    ports:
+      - "${SCALA_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      RESULTS_DIR: /data/results
+      HTTP_THREADS: "8"
+    volumes:
+      - ./data/results:/data/results
+    healthcheck:
+      # La imagen de Java no trae curl: se usa una petición HTTP mínima con bash.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  go-service:
+    image: *go-image
+    container_name: gamestats-go
+    ports:
+      - "${GO_PORT:-8081}:8081"
+    environment:
+      PORT: "8081"
+      SCALA_ANALYSIS_URL: http://scala-analytics:8080/analyze
+      INBOX_DIR: /data/inbox
+      INBOX_WORKERS: "4"
+      ANALYSIS_WORKERS: "4"
+    volumes:
+      - ./data/inbox:/data/inbox
+    depends_on:
+      scala-analytics:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  # Ejecución puntual: docker compose run --rm simulator [opciones]
+  simulator:
+    profiles: ["demo"]
+    image: *go-image
+    entrypoint: ["/app/simulator"]
+    environment:
+      SIMULATOR_URL: http://go-service:8081
+      SIMULATOR_OUT: /data/inbox
+    volumes:
+      - ./data/inbox:/data/inbox
+    depends_on:
+      go-service:
+        condition: service_healthy
+    restart: "no"
+
+  # Fuente continua que imita a la futura consola: escribe archivos en la bandeja.
+  live-simulator:
+    profiles: ["live"]
+    image: *go-image
+    entrypoint: ["/app/simulator"]
+    environment:
+      SIMULATOR_URL: http://go-service:8081
+      SIMULATOR_OUT: /data/inbox
+    command: ["-mode", "files", "-scenario", "random", "-matches", "1", "-continuous", "-every", "20s", "-interval", "500ms", "-timeout", "0"]
+    volumes:
+      - ./data/inbox:/data/inbox
+    depends_on:
+      go-service:
+        condition: service_healthy
+    restart: unless-stopped

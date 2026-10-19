@@ -1,7 +1,24 @@
+# Scala / sbt
 target/
 project/target/
-project/project/target/
+project/project/
 .bsp/
 .bloop/
-.idea/
+.metals/
 *.class
+
+# Go
+go_service/bin/
+*.test
+*.out
+
+# Datos generados en ejecución (bandeja y resultados)
+data/
+
+# Editores y sistema
+.idea/
+.vscode/
+.DS_Store
+.env
+dist/
+compose-logs.txt
