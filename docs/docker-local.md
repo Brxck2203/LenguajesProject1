@@ -4,14 +4,15 @@ Ejecutar los comandos en **PowerShell**, desde la raíz del proyecto (la carpeta
 
 ## 1. Obtener la versión correcta
 
-Antes de fusionar el PR, usar su rama:
+Usar la versión final de `main`:
 
 ```powershell
 git fetch origin
-git switch --track origin/feature/review-dashboard
+git switch main
+git pull --ff-only
 ```
 
-Si la rama ya existe localmente, ejecutar `git switch feature/review-dashboard` y `git pull --ff-only`. Después del merge, usar `git switch main` y `git pull --ff-only`. Guardar los cambios locales propios antes de cambiar de rama.
+Si se descargó el proyecto como ZIP, descomprimirlo y abrir PowerShell en la carpeta que contiene `docker-compose.yml`. Git no es necesario para ejecutar esa copia.
 
 ## 2. Comprobar Docker y puertos
 
