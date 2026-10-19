@@ -135,3 +135,16 @@ git push origin v1.0.0
 - [Instrucciones del paquete Release](release-readme.md): utiliza siempre `--release` / `-Release` y `docker compose -f docker-compose.release.yml`.
 
 El reinicio de Go pierde sus partidas y análisis en memoria; los resultados persistidos por Scala continúan disponibles en `/results`. No se requiere eliminar `data` entre pruebas.
+
+## Panel visual de revisión
+
+Abre <http://localhost:8081/dashboard> (o el puerto Go configurado). El panel muestra:
+
+- Resumen por juego y patrones detectados.
+- Partidas con estadísticas por jugador, resumen y eventos que sustentan cada patrón.
+- Historial acumulado de jugadores.
+- Estado de la bandeja y catálogo de eventos.
+
+**Generar demostración** crea ocho partidas nuevas (dos por juego, 73 eventos) y las envía al mismo procesamiento de Go. La recepción es inmediata; el análisis ocurre después en Scala. Esperar unos segundos hasta que aparezcan los resultados. Los errores de Scala se muestran explícitamente y se pueden reintentar los análisis fallidos desde el detalle.
+
+Las partidas con resultados guardados siguen visibles aunque Go se reinicie. El panel no calcula estadísticas: las obtiene de Scala mediante rutas de consulta del mismo servidor Go. Las API JSON originales continúan disponibles, incluida la raíz `/` como índice. Si se usa una URL Scala personalizada, el panel requiere que termine en `/analyze`.

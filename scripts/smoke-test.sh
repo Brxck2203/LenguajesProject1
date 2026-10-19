@@ -38,4 +38,8 @@ for pattern in FLURRY_KNOCKDOWN TEAM_BUILDUP_GOAL COMEBACK_AFTER_INCIDENT THIRD_
 done
 ls data/results/smoke_http_"$STAMP"_*.json >/dev/null 2>&1 || { echo "FALLO: Scala no guardó resultados en data/results" >&2; exit 1; }
 
-echo "OK: Go y Scala integrados; resultados en data/results"
+curl -fsS "$GO_URL/dashboard" -o /tmp/gamestats-dashboard.html
+grep -q '<title>GameStats' /tmp/gamestats-dashboard.html
+curl -fsS "$GO_URL/dashboard/api/health" >/dev/null
+
+echo "OK: Go y Scala integrados; panel en $GO_URL/dashboard; resultados en data/results"

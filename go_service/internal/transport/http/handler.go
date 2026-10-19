@@ -27,6 +27,7 @@ type Handler struct {
 	inbox    InboxStatus
 	// inboxError explains why the inbox is disabled, when it failed to start.
 	inboxError string
+	dashboard  http.Handler
 }
 
 type eventsBatchRequest struct {
@@ -325,6 +326,7 @@ func (handler *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":   "GameStats Go",
+		"dashboard": "/dashboard",
 		"health":    "/health",
 		"matches":   "/matches",
 		"catalog":   "/catalog",

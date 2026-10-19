@@ -25,6 +25,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1  # Windows
 
 El instalador construye y prueba los dos módulos dentro de Docker, crea las carpetas `data/inbox` y `data/results`, levanta los servicios y ejecuta una prueba de humo de punta a punta.
 
+Abre el **[panel de revisión](http://localhost:8081/dashboard)**. Permite generar ocho partidas de demostración con un botón y revisar estadísticas, patrones, jugadores y la bandeja de archivos. No requiere instalar herramientas de frontend.
+
 Luego:
 
 ```sh
