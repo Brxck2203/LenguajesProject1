@@ -15,6 +15,12 @@ type Config struct {
 	ScalaTimeout    time.Duration
 	ShutdownTimeout time.Duration
 	Processing      processing.Config
+	// EventCatalogPath replaces the embedded event catalog when set.
+	EventCatalogPath string
+	// InboxDir enables file ingestion: producers drop *.json / *.jsonl files there.
+	InboxDir          string
+	InboxPollInterval time.Duration
+	InboxWorkers      int
 }
 
 func Load() (Config, error) {
@@ -25,6 +31,8 @@ func Load() (Config, error) {
 		return result, fmt.Errorf("PORT must be between 1 and 65535")
 	}
 	result.ScalaURL = value("SCALA_ANALYSIS_URL", "http://localhost:8080/analyze")
+	result.EventCatalogPath = value("EVENT_CATALOG_PATH", "")
+	result.InboxDir = value("INBOX_DIR", "")
 	for _, setting := range []struct {
 		name     string
 		fallback time.Duration
@@ -34,6 +42,7 @@ func Load() (Config, error) {
 		{"SHUTDOWN_TIMEOUT", 30 * time.Second, &result.ShutdownTimeout},
 		{"ANALYSIS_RETRY_BASE", time.Second, &result.Processing.RetryBase},
 		{"ANALYSIS_RETRY_MAX", 10 * time.Second, &result.Processing.RetryMax},
+		{"INBOX_POLL_INTERVAL", 500 * time.Millisecond, &result.InboxPollInterval},
 	} {
 		parsed, err := time.ParseDuration(value(setting.name, setting.fallback.String()))
 		if err != nil || parsed <= 0 {
@@ -49,6 +58,7 @@ func Load() (Config, error) {
 		{"ANALYSIS_WORKERS", "4", &result.Processing.Workers},
 		{"ANALYSIS_CAPACITY", "128", &result.Processing.Capacity},
 		{"ANALYSIS_MAX_ATTEMPTS", "3", &result.Processing.MaxAttempts},
+		{"INBOX_WORKERS", "4", &result.InboxWorkers},
 	} {
 		parsed, err := strconv.Atoi(value(setting.name, setting.fallback))
 		if err != nil || parsed <= 0 {

@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "description": "Catálogo de eventos de GameStats. Agregar un juego o una acción solo requiere editar este archivo (o uno equivalente indicado en EVENT_CATALOG_PATH). Tipos de campo: string, boolean, positiveNumber, positiveInteger, nonNegativeInteger.",
+  "commonOptional": {
+    "teamId": "string"
+  },
+  "lifecycle": {
+    "MATCH_STARTED": {
+      "description": "Abre la partida. type=MATCH y playerId=SYSTEM.",
+      "optional": { "mode": "string", "map": "string", "track": "string", "totalLaps": "positiveInteger" }
+    },
+    "MATCH_FINISHED": {
+      "description": "Cierra la partida y dispara el análisis. type=MATCH y playerId=SYSTEM. El ganador es opcional: si falta, Scala lo infiere.",
+      "optional": { "winnerPlayerId": "string", "winnerTeamId": "string", "reason": "string" }
+    }
+  },
+  "games": {
+    "MMA": {
+      "description": "Artes marciales mixtas, combate 1 contra 1.",
+      "actions": {
+        "STRIKE_ATTEMPT": { "description": "Golpe lanzado.", "required": { "targetPlayerId": "string" }, "optional": { "strikeType": "string" } },
+        "STRIKE_LANDED": { "description": "Golpe que conecta; se envía además de STRIKE_ATTEMPT.", "required": { "targetPlayerId": "string" }, "optional": { "strikeType": "string" } },
+        "TAKEDOWN": { "description": "Derribo.", "required": { "targetPlayerId": "string" } },
+        "KNOCKDOWN": { "description": "El rival cae por un golpe.", "required": { "targetPlayerId": "string" } },
+        "REFEREE_STOPPAGE": { "description": "El árbitro detiene la pelea a favor del actor.", "required": { "victimId": "string" } }
+      }
+    },
+    "FOOTBALL": {
+      "description": "Fútbol por equipos; teamId identifica al equipo del actor.",
+      "actions": {
+        "PASS": { "description": "Pase.", "required": { "receiverPlayerId": "string", "completed": "boolean" }, "optional": { "distanceMeters": "positiveNumber" } },
+        "GOAL": { "description": "Gol del actor.", "optional": { "minute": "nonNegativeInteger" } },
+        "INTERCEPTION": { "description": "El actor recupera el balón de targetPlayerId.", "required": { "targetPlayerId": "string" } },
+        "FOUL": { "description": "Falta del actor sobre targetPlayerId.", "required": { "targetPlayerId": "string" }, "optional": { "card": "string" } }
+      }
+    },
+    "MOTORCYCLE_RACING": {
+      "description": "Carreras de motos por vueltas.",
+      "actions": {
+        "LAP_COMPLETED": { "description": "Vuelta completada.", "required": { "lapNumber": "positiveInteger", "lapTimeMs": "positiveNumber", "position": "positiveInteger" }, "optional": { "topSpeedKmh": "positiveNumber" } },
+        "CRASH": { "description": "Caída.", "optional": { "position": "positiveInteger" } },
+        "PIT_STOP": { "description": "Entrada a boxes.", "optional": { "position": "positiveInteger" } },
+        "REJOIN_RACE": { "description": "El piloto vuelve a la pista.", "optional": { "position": "positiveInteger" } }
+      }
+    },
+    "FREE_FIRE": {
+      "description": "Battle royale: todos contra todos hasta un sobreviviente.",
+      "actions": {
+        "DAMAGE_DEALT": { "description": "Daño del actor a targetPlayerId.", "required": { "targetPlayerId": "string", "damage": "positiveNumber" }, "optional": { "weapon": "string" } },
+        "PLAYER_ELIMINATED": { "description": "El actor elimina a victimId.", "required": { "victimId": "string" }, "optional": { "weapon": "string" } },
+        "ZONE_SHRINK": { "description": "La zona segura se reduce (playerId=SYSTEM).", "optional": { "zonePhase": "positiveInteger" } }
+      }
+    }
+  }
+}

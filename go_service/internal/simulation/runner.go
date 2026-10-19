@@ -106,6 +106,13 @@ func (runner Runner) WaitForAnalyses(ctx context.Context, matches []Match) error
 			var snapshot domain.AnalysisSnapshot
 			err = json.NewDecoder(io.LimitReader(response.Body, 5<<20)).Decode(&snapshot)
 			response.Body.Close()
+			// 404/409: the match is still being ingested (for example from inbox files).
+			if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusConflict {
+				if err := wait(ctx, 200*time.Millisecond); err != nil {
+					return fmt.Errorf("analysis %s not ready: %w", m.ID, err)
+				}
+				continue
+			}
 			if response.StatusCode != http.StatusOK {
 				return fmt.Errorf("analysis %s: HTTP %d", m.ID, response.StatusCode)
 			}

@@ -2,5 +2,6 @@
 bin
 *.test
 *.out
-README.md
+*.md
 docs
+.env

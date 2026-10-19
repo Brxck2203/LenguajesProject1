@@ -15,6 +15,7 @@ import (
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/domain"
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/match"
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/processing"
+	"github.com/Brxck2203/LenguajesProject1/go_service/internal/validation"
 )
 
 const maxRequestBodySize = 1 << 20
@@ -22,6 +23,10 @@ const maxRequestBodySize = 1 << 20
 type Handler struct {
 	store    EventStore
 	analysis AnalysisService
+	catalog  *validation.Catalog
+	inbox    InboxStatus
+	// inboxError explains why the inbox is disabled, when it failed to start.
+	inboxError string
 }
 
 type eventsBatchRequest struct {
@@ -322,7 +327,10 @@ func (handler *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"service":   "GameStats Go",
 		"health":    "/health",
 		"matches":   "/matches",
-		"ingestion": "POST /events or POST /events/batch",
+		"catalog":   "/catalog",
+		"inbox":     "/inbox",
+		"ingestion": "POST /events, POST /events/batch, or JSON files in the inbox folder",
+		"games":     handler.catalog.GameIDs(),
 		"note":      "Run the simulator to create matches. Health does not verify Scala; query each analysis URL for its status.",
 	})
 }
@@ -344,4 +352,30 @@ func (handler *Handler) handleMatches(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item{MatchID: id, SummaryURL: path, AnalysisURL: path + "/analysis"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"matches": items, "count": len(items)})
+}
+
+func (handler *Handler) handleCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, handler.catalog)
+}
+
+func (handler *Handler) handleInbox(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if handler.inbox == nil {
+		response := map[string]any{"enabled": false, "hint": "set INBOX_DIR to enable file ingestion"}
+		if handler.inboxError != "" {
+			response["error"] = handler.inboxError
+		}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "stats": handler.inbox.Stats()})
 }

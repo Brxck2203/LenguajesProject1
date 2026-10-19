@@ -1,0 +1,7 @@
+# Los scripts de shell deben conservar finales de línea LF aunque se clone en Windows.
+*.sh  text eol=lf
+*.yml text eol=lf
+*.go  text eol=lf
+*.scala text eol=lf
+*.sbt text eol=lf
+Dockerfile text eol=lf

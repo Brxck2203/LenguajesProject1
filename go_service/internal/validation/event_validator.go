@@ -5,38 +5,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/domain"
 )
 
-var allowedActionsByGame = map[string]map[string]struct{}{
-	domain.GameMMA: {
-		domain.ActionMatchStarted: {}, domain.ActionMatchFinished: {},
-		domain.ActionStrikeAttempt: {}, domain.ActionStrikeLanded: {},
-		domain.ActionTakedown: {}, domain.ActionKnockdown: {}, domain.ActionRefereeStoppage: {},
-	},
-	domain.GameFootball: {
-		domain.ActionMatchStarted: {}, domain.ActionMatchFinished: {},
-		domain.ActionPass: {}, domain.ActionGoal: {}, domain.ActionInterception: {}, domain.ActionFoul: {},
-	},
-	domain.GameMotorcycleRacing: {
-		domain.ActionMatchStarted: {}, domain.ActionMatchFinished: {},
-		domain.ActionLapCompleted: {}, domain.ActionCrash: {}, domain.ActionPitStop: {}, domain.ActionRejoinRace: {},
-	},
-	domain.GameFreeFire: {
-		domain.ActionMatchStarted: {}, domain.ActionMatchFinished: {},
-		domain.ActionDamageDealt: {}, domain.ActionPlayerEliminated: {}, domain.ActionZoneShrink: {},
-	},
+// Validator checks events against a Catalog. It is immutable after creation and
+// therefore safe for concurrent use.
+type Validator struct {
+	catalog Catalog
 }
+
+func NewValidator(catalog Catalog) (*Validator, error) {
+	if err := catalog.check(); err != nil {
+		return nil, err
+	}
+	return &Validator{catalog: catalog}, nil
+}
+
+var defaultValidator = mustDefaultValidator()
+
+func mustDefaultValidator() *Validator {
+	catalog, err := ParseCatalog(defaultCatalogJSON)
+	if err != nil {
+		panic(err) // the embedded catalog is covered by tests
+	}
+	return &Validator{catalog: catalog}
+}
+
+// Default returns the validator built from the embedded catalog.
+func Default() *Validator { return defaultValidator }
+
+// Catalog returns the catalog used by the validator.
+func (validator *Validator) Catalog() Catalog { return validator.catalog }
 
 // IsLifecycleAction reports whether action controls a match's lifecycle.
 func IsLifecycleAction(action string) bool {
 	return action == domain.ActionMatchStarted || action == domain.ActionMatchFinished
 }
 
-// ValidateEvent checks the common event envelope and the minimum data required by each action.
-func ValidateEvent(event domain.Event) error {
+// ValidateEvent checks an event with the embedded default catalog.
+func ValidateEvent(event domain.Event) error { return defaultValidator.Validate(event) }
+
+// Validate checks the common event envelope and the data fields declared for the action.
+func (validator *Validator) Validate(event domain.Event) error {
 	if strings.TrimSpace(event.EventID) == "" {
 		return fmt.Errorf("eventId is required")
 	}
@@ -62,12 +75,15 @@ func ValidateEvent(event domain.Event) error {
 		return fmt.Errorf("data must be a JSON object")
 	}
 
-	actions, exists := allowedActionsByGame[event.GameID]
+	game, exists := validator.catalog.Games[event.GameID]
 	if !exists {
-		return fmt.Errorf("unsupported gameId: %s", event.GameID)
+		return fmt.Errorf("unsupported gameId: %s (supported: %s)", event.GameID, strings.Join(validator.catalog.GameIDs(), ", "))
 	}
-	if _, exists := actions[event.Action]; !exists {
-		return fmt.Errorf("action %s is not supported for gameId %s", event.Action, event.GameID)
+	var spec ActionSpec
+	if IsLifecycleAction(event.Action) {
+		spec = validator.catalog.Lifecycle[event.Action]
+	} else if spec, exists = game.Actions[event.Action]; !exists {
+		return fmt.Errorf("action %s is not supported for gameId %s (supported: %s)", event.Action, event.GameID, strings.Join(actionNames(game), ", "))
 	}
 	if err := validateEventType(event); err != nil {
 		return err
@@ -80,12 +96,69 @@ func ValidateEvent(event domain.Event) error {
 	if err != nil {
 		return err
 	}
-	if team, exists := data["teamId"]; exists {
-		if value, ok := team.(string); !ok || strings.TrimSpace(value) == "" {
-			return fmt.Errorf("data.teamId must be a non-empty string")
+	if err := checkPresent(data, validator.catalog.CommonOptional); err != nil {
+		return err
+	}
+	for _, field := range sortedKeys(spec.Required) {
+		if err := checkField(data, field, spec.Required[field]); err != nil {
+			return err
 		}
 	}
-	return validateActionData(event.Action, data)
+	return checkPresent(data, spec.Optional)
+}
+
+func actionNames(game GameSpec) []string {
+	names := make([]string, 0, len(game.Actions))
+	for name := range game.Actions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedKeys(fields map[string]FieldKind) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// checkPresent validates optional fields only when the producer includes them.
+func checkPresent(data map[string]any, fields map[string]FieldKind) error {
+	for _, field := range sortedKeys(fields) {
+		if _, exists := data[field]; exists {
+			if err := checkField(data, field, fields[field]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func checkField(data map[string]any, field string, kind FieldKind) error {
+	switch kind {
+	case KindString:
+		return requireNonEmptyString(data, field)
+	case KindBoolean:
+		if _, ok := data[field].(bool); !ok {
+			return fmt.Errorf("data.%s must be a boolean", field)
+		}
+		return nil
+	case KindPositiveNumber:
+		return requirePositiveNumber(data, field)
+	case KindPositiveInteger:
+		return requirePositiveInteger(data, field)
+	case KindNonNegativeInteger:
+		value, ok := data[field].(float64)
+		if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || math.Trunc(value) != value {
+			return fmt.Errorf("data.%s must be a non-negative integer", field)
+		}
+		return nil
+	default:
+		return fmt.Errorf("data.%s has unsupported kind %s", field, kind)
+	}
 }
 
 func validateEventType(event domain.Event) error {
@@ -110,38 +183,6 @@ func validateLifecycleActor(event domain.Event) error {
 	return nil
 }
 
-func validateActionData(action string, data map[string]any) error {
-	switch action {
-	case domain.ActionStrikeAttempt, domain.ActionStrikeLanded, domain.ActionTakedown, domain.ActionKnockdown, domain.ActionInterception, domain.ActionFoul:
-		return requireNonEmptyString(data, "targetPlayerId")
-	case domain.ActionRefereeStoppage, domain.ActionPlayerEliminated:
-		return requireNonEmptyString(data, "victimId")
-	case domain.ActionPass:
-		if err := requireNonEmptyString(data, "receiverPlayerId"); err != nil {
-			return err
-		}
-		if _, ok := data["completed"].(bool); !ok {
-			return fmt.Errorf("data.completed must be a boolean")
-		}
-		return nil
-	case domain.ActionLapCompleted:
-		if err := requirePositiveInteger(data, "lapNumber"); err != nil {
-			return err
-		}
-		if err := requirePositiveNumber(data, "lapTimeMs"); err != nil {
-			return err
-		}
-		return requirePositiveInteger(data, "position")
-	case domain.ActionDamageDealt:
-		if err := requireNonEmptyString(data, "targetPlayerId"); err != nil {
-			return err
-		}
-		return requirePositiveNumber(data, "damage")
-	default:
-		return nil
-	}
-}
-
 func isJSONObject(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	return len(trimmed) >= 2 && trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
@@ -158,7 +199,7 @@ func decodeData(raw json.RawMessage) (map[string]any, error) {
 func requireNonEmptyString(data map[string]any, field string) error {
 	value, ok := data[field].(string)
 	if !ok || strings.TrimSpace(value) == "" {
-		return fmt.Errorf("data.%s is required and must be a non-empty string", field)
+		return fmt.Errorf("data.%s must be a non-empty string", field)
 	}
 	return nil
 }
@@ -166,7 +207,7 @@ func requireNonEmptyString(data map[string]any, field string) error {
 func requirePositiveNumber(data map[string]any, field string) error {
 	value, ok := data[field].(float64)
 	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
-		return fmt.Errorf("data.%s is required and must be a positive number", field)
+		return fmt.Errorf("data.%s must be a positive number", field)
 	}
 	return nil
 }

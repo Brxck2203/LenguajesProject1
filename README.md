@@ -1,89 +1,82 @@
-# GameStats — Go y Scala
+# GameStats
 
-Go recibe y valida eventos de MMA, fútbol, motociclismo y Free Fire, conserva partidas en memoria y envía cada partida cerrada a Scala. Scala debe calcular las estadísticas y detectar patrones.
+Plataforma para recibir, procesar y analizar los eventos que generan partidas de videojuegos. Proyecto 1 del curso de Lenguajes de Programación: el mismo problema se resuelve con dos paradigmas.
 
-**Estado actual:** el flujo Go, el simulador y su configuración Docker están integrados. Scala conserva su implementación actual: `/analytics` devuelve un ejemplo fijo; todavía falta implementar `POST /analyze` con el [contrato de integración](go_service/docs/scala_contract.md). Por ello se pueden generar y consultar partidas reales en Go, pero sus análisis quedan `FAILED` hasta adaptar Scala. `health: ok` solo confirma que el servidor responde.
+- **Go (imperativo)**: recibe los eventos por HTTP o como archivos en una carpeta, los valida contra un catálogo, reconstruye cada partida en memoria procesando muchas a la vez con goroutines y channels, y al cerrarse la envía a Scala.
+- **Scala (funcional)**: transforma el lote de cada partida en estadísticas por jugador y por partida, detecta patrones que relacionan varios eventos y guarda los resultados en JSON.
 
-## Probar desde Docker Desktop
+Juegos incluidos: **MMA**, **fútbol**, **motociclismo** y **Free Fire** (battle royale). El formato es genérico: se puede agregar un juego nuevo editando un catálogo JSON, sin tocar el código de Go.
 
-Abre Docker Desktop y una consola en la raíz del repositorio. No necesitas instalar Go para estos pasos.
+```mermaid
+flowchart LR
+    P[Simulador / consola] -- HTTP o archivos --> G[go-service :8081<br/>validación · estado · concurrencia]
+    G -- POST /analyze<br/>lote de la partida --> S[scala-analytics :8080<br/>estadísticas · patrones]
+    S --> R[(data/results)]
+```
+
+## Inicio rápido
+
+Solo se necesita Docker.
 
 ```sh
-git switch main
-git pull --ff-only
-docker compose up -d --build
-docker compose ps
+bash scripts/install.sh                                      # Linux / macOS / WSL
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1  # Windows
 ```
 
-Espera a que Go aparezca `healthy`. La primera compilación de Scala puede tardar. Si un servicio no arranca:
+El instalador construye y prueba los dos módulos dentro de Docker, crea las carpetas `data/inbox` y `data/results`, levanta los servicios y ejecuta una prueba de humo de punta a punta.
+
+Luego:
 
 ```sh
-docker compose logs --tail=100 go-service scala-analytics
+docker compose run --rm simulator -scenario random -matches 10 -wait   # genera 40 partidas
 ```
 
-1. Abre <http://localhost:8081/> para ver las rutas disponibles, y <http://localhost:8081/health> para comprobar Go.
-2. Genera ocho partidas (dos por juego, 73 eventos) desde un contenedor temporal:
+- <http://localhost:8080/stats/games>: resumen por juego (partidas, duración, patrones, ganadores)
+- <http://localhost:8080/stats/games/FREE_FIRE/players>: historial de cada jugador
+- <http://localhost:8080/results>: partidas analizadas; `/results/{matchId}` para el detalle
+- <http://localhost:8081/matches>: partidas recibidas por Go y estado de su análisis
+- <http://localhost:8081/catalog>: formato de eventos para los productores
+- <http://localhost:8081/inbox>: estado de la bandeja de archivos
 
-   ```sh
-   docker compose run --rm simulator
-   ```
+Para simular una fuente que no se detiene (como será la consola de juegos): `docker compose --profile live up -d live-simulator`. Para detener todo: `docker compose down`.
 
-   El comando imprime los identificadores aceptados. Cada ejecución usa identificadores nuevos. Que termine correctamente significa que Go aceptó los eventos; no que Scala haya calculado resultados.
-3. Abre <http://localhost:8081/matches>. Verás una lista JSON con `matchId`, `summaryUrl` y `analysisUrl`. Antes de simular, la lista está vacía.
-4. Copia una `summaryUrl` y agrégala a `http://localhost:8081` para ver juego, participantes, cantidad de eventos y estado de la partida. Haz lo mismo con `analysisUrl` para ver estado del análisis, intentos, error o resultado.
+La [guía paso a paso para Docker Desktop](docs/docker-local.md) explica cómo probar el PR, consultar resultados, verificar persistencia y diagnosticar errores.
 
-Para usar un identificador predecible (cámbialo al repetir en la misma sesión):
+## Qué cumple del enunciado
+
+| Requisito | Dónde |
+|---|---|
+| Formato de eventos común y documentado | [docs/eventos.md](docs/eventos.md), catálogo en `go_service/internal/validation/event_catalog.json` |
+| Juegos considerados y justificación de los eventos | [docs/juegos-y-estadisticas.md](docs/juegos-y-estadisticas.md) |
+| Validación, eventos inválidos registrados o rechazados | Go: respuestas 400/409 por HTTP; `data/inbox/rejected/*.error.json` para archivos |
+| Identificar juegos, partidas y jugadores; varios eventos por partida | `go_service/internal/match` |
+| Concurrencia con goroutines y channels | Bandeja particionada por partida, cola de análisis con workers, simulador con una goroutine por partida |
+| Estadísticas por jugador, por partida y combinando tipos de eventos | `scala_service/.../analytics/games/*` (diferencial, asistencias, K/D, cambios de líder…) |
+| Reglas sobre secuencias de eventos | 9 patrones: ráfaga con knockdown, jugada colectiva, *third party*, remontadas, rachas… |
+| Resultados estructurados y consultables | JSON por HTTP y en `data/results/` |
+| Fuente simulada realista, partidas en paralelo | `go_service/cmd/simulator`: 8 partidas guionadas + generador aleatorio reproducible |
+| Docker, ejecución integrada, CI/CD y despliegue | [docs/despliegue.md](docs/despliegue.md), `docker-compose.yml`, `.github/workflows/ci-cd.yml` |
+| Justificación de la arquitectura y de los paradigmas | [docs/arquitectura.md](docs/arquitectura.md), [docs/contrato-go-scala.md](docs/contrato-go-scala.md) |
+
+## Desarrollo local sin Docker
 
 ```sh
-docker compose run --rm simulator -url http://go-service:8081 -prefix demo_01
+# Terminal 1 — Scala (Java 17 y sbt)
+cd scala_service && sbt run
+
+# Terminal 2 — Go 1.22+
+cd go_service && INBOX_DIR=../data/inbox go run ./cmd/server
+
+# Terminal 3
+cd go_service && go run ./cmd/simulator -scenario all -wait
 ```
 
-Entonces abre:
+Pruebas: `cd go_service && go test -race ./...` y `cd scala_service && sbt test`.
 
-- <http://localhost:8081/matches/demo_01_FREE_FIRE_1>
-- <http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis>
+Más detalle de cada módulo en [go_service/README.md](go_service/README.md) y [scala_service/README.md](scala_service/README.md).
 
-`FINISHED` significa que Go cerró la partida. `COMPLETED` significa que Scala devolvió un resultado compatible. Con el Scala actual se espera `FAILED` y un error HTTP 404 para `/analyze`; no es un error de DNS ni prueba de que se perdieran los eventos.
+## Estado de validación y despliegue
 
-## Qué se puede ver en Scala
+Las pruebas de Go y Scala y la integración con ambos procesos reales se verificaron durante la preparación de esta versión. La construcción y ejecución en Docker se valida en el trabajo `integration` del PR; revisar su resultado antes de fusionar. El trabajo `deploy` comprueba imágenes publicadas en un runner temporal de GitHub: no deja un servidor público permanente. Para la demostración local se utiliza el instalador Docker; para un servidor permanente, ver [despliegue](docs/despliegue.md).
 
-- <http://localhost:8080/health>: salud del servidor Scala.
-- <http://localhost:8080/analytics>: métricas de datos fijos de ejemplo, **no de las partidas enviadas por Go**.
-- `http://localhost:8080/` puede seguir devolviendo 404 porque Scala no define una página inicial.
-
-No hay una interfaz gráfica: las consultas muestran JSON. El antiguo proxy Go `/scala-metrics` se retiró; para ver ese mismo ejemplo utiliza directamente `/analytics` en el puerto 8080. El ejecutable Go actual es `cmd/server`, no el antiguo `go_service/main.go`.
-
-## Cuando Scala implemente el contrato
-
-Compose ya configura `SCALA_ANALYSIS_URL=http://scala-analytics:8080/analyze`. Reconstruye **solo Scala**, conservando el proceso Go y sus datos:
-
-```sh
-docker compose up -d --build --no-deps scala-analytics
-```
-
-Luego, en PowerShell, reintenta una partida fallida:
-
-```powershell
-Invoke-RestMethod -Method Post http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis/retry
-Invoke-RestMethod http://localhost:8081/matches/demo_01_FREE_FIRE_1/analysis | ConvertTo-Json -Depth 20
-```
-
-También puedes crear nuevas partidas y esperar resultados compatibles:
-
-```sh
-docker compose run --rm simulator -url http://go-service:8081 -wait
-```
-
-No uses `-wait` como prueba exitosa del Scala actual: termina con error al detectar un análisis fallido. Los errores transitorios tienen reintentos automáticos; un 404 requiere corregir la API y reintentar manualmente.
-
-## Detener y limitaciones
-
-```sh
-docker compose down
-```
-
-Los datos son **solo en memoria**: reiniciar o recrear Go elimina partidas, resultados y eventos. No hay base de datos ni volumen persistente. El healthcheck de Go no certifica disponibilidad ni compatibilidad de Scala.
-
-La implementación Go cuenta con pruebas unitarias, HTTP y de concurrencia; sus pruebas de integración utilizan un servidor Scala simulado. La construcción y ejecución conjunta de los contenedores reales queda por verificar en un entorno con Docker; tampoco se han validado métricas reales de Scala con estos lotes.
-
-Consulta el [README de Go](go_service/README.md) para arquitectura, variables, API, simulación local y pruebas. El [contrato Go–Scala](go_service/docs/scala_contract.md) describe los campos y respuestas pendientes de implementar en Scala.
+Scala se encuentra en `scala_service/`. La configuración Scala antigua de la raíz fue sustituida por este módulo; el servidor Go continúa en `go_service/`.
