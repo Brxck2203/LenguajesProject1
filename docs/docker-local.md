@@ -4,14 +4,15 @@ Ejecutar los comandos en **PowerShell**, desde la raíz del proyecto (la carpeta
 
 ## 1. Obtener la versión correcta
 
-Antes de fusionar el PR, usar su rama:
+Usar la versión final de `main`:
 
 ```powershell
 git fetch origin
-git switch --track origin/feature/integrated-gamestats-release
+git switch main
+git pull --ff-only
 ```
 
-Si la rama ya existe localmente, ejecutar `git switch feature/integrated-gamestats-release` y `git pull --ff-only`. Después del merge, usar `git switch main` y `git pull --ff-only`. Guardar los cambios locales propios antes de cambiar de rama.
+Si se descargó el proyecto como ZIP, descomprimirlo y abrir PowerShell en la carpeta que contiene `docker-compose.yml`. Git no es necesario para ejecutar esa copia.
 
 ## 2. Comprobar Docker y puertos
 
@@ -61,7 +62,7 @@ Con los puertos predeterminados:
 - <http://localhost:8080/stats/games/FREE_FIRE/players>: historial por jugador.
 - <http://localhost:8081/inbox>: procesamiento de archivos.
 
-Se muestran documentos JSON; no hay interfaz gráfica. Los mensajes del simulador indican entrega de eventos; `COMPLETED` y las estadísticas consultadas confirman el análisis.
+Abre <http://localhost:8081/dashboard> para la interfaz visual. Las rutas anteriores conservan las respuestas JSON para inspección técnica. Los mensajes del simulador indican entrega de eventos; `COMPLETED` y las estadísticas consultadas confirman el análisis.
 
 Para consultar una partida en PowerShell:
 
@@ -119,3 +120,16 @@ Los archivos del directorio `data` permanecen en el equipo. No es necesario borr
 - Workflow CI/CD del PR finalizado correctamente.
 
 La ejecución local mediante Compose es un entorno de despliegue reproducible. La verificación automática del pipeline corre en máquinas temporales de GitHub y no proporciona una dirección pública permanente.
+
+## Panel visual de revisión
+
+Abre <http://localhost:8081/dashboard> (o el puerto Go configurado). El panel muestra:
+
+- Resumen por juego y patrones detectados.
+- Partidas con estadísticas por jugador, resumen y eventos que sustentan cada patrón.
+- Historial acumulado de jugadores.
+- Estado de la bandeja y catálogo de eventos.
+
+**Generar demostración** crea ocho partidas nuevas (dos por juego, 73 eventos) y las envía al mismo procesamiento de Go. La recepción es inmediata; el análisis ocurre después en Scala. Esperar unos segundos hasta que aparezcan los resultados. Los errores de Scala se muestran explícitamente y se pueden reintentar los análisis fallidos desde el detalle.
+
+Las partidas con resultados guardados siguen visibles aunque Go se reinicie. El panel no calcula estadísticas: las obtiene de Scala mediante rutas de consulta del mismo servidor Go. Las API JSON originales continúan disponibles, incluida la raíz `/` como índice. Si se usa una URL Scala personalizada, el panel requiere que termine en `/analyze`.

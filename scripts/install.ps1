@@ -54,6 +54,7 @@ if (-not $NoTest) {
 
 Write-Host ''
 Write-Host 'GameStats está listo:'
+Write-Host '  Panel visual:      http://localhost:8081/dashboard'
 Write-Host '  Go (ingestión):    http://localhost:8081/   (/matches, /catalog, /inbox)'
 Write-Host '  Scala (análisis):  http://localhost:8080/   (/results, /stats/games)'
 Write-Host '  Bandeja: .\data\inbox   Resultados: .\data\results'

@@ -42,6 +42,11 @@ func WithInbox(status InboxStatus) Option {
 	return func(handler *Handler) { handler.inbox = status }
 }
 
+// WithDashboard mounts the optional browser review panel.
+func WithDashboard(panel http.Handler) Option {
+	return func(handler *Handler) { handler.dashboard = panel }
+}
+
 func NewRouter(store EventStore, analysis AnalysisService, options ...Option) http.Handler {
 	handler := &Handler{store: store, analysis: analysis}
 	for _, option := range options {
@@ -52,6 +57,10 @@ func NewRouter(store EventStore, analysis AnalysisService, options ...Option) ht
 		handler.catalog = &catalog
 	}
 	mux := http.NewServeMux()
+	if handler.dashboard != nil {
+		mux.Handle("/dashboard", handler.dashboard)
+		mux.Handle("/dashboard/", handler.dashboard)
+	}
 	mux.HandleFunc("/catalog", handler.handleCatalog)
 	mux.HandleFunc("/inbox", handler.handleInbox)
 	mux.HandleFunc("/health", handler.handleHealth)

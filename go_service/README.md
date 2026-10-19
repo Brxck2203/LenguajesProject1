@@ -119,3 +119,16 @@ Las pruebas cubren la validación y el catálogo (incluido un juego nuevo defini
 - `eventId` es único durante la vida del proceso. Una partida solo abre con `MATCH_STARTED`; después del cierre no se aceptan más eventos.
 - Con la capacidad llena, el cierre se rechaza **antes** de modificar la partida, para que el productor pueda reenviarlo.
 - El estado de Go está en memoria: reiniciar el proceso borra las partidas en curso. El historial persistente lo guarda Scala en `data/results`.
+
+## Panel visual de revisión
+
+Abre <http://localhost:8081/dashboard> (o el puerto Go configurado). El panel muestra:
+
+- Resumen por juego y patrones detectados.
+- Partidas con estadísticas por jugador, resumen y eventos que sustentan cada patrón.
+- Historial acumulado de jugadores.
+- Estado de la bandeja y catálogo de eventos.
+
+**Generar demostración** crea ocho partidas nuevas (dos por juego, 73 eventos) y las envía al mismo procesamiento de Go. La recepción es inmediata; el análisis ocurre después en Scala. Esperar unos segundos hasta que aparezcan los resultados. Los errores de Scala se muestran explícitamente y se pueden reintentar los análisis fallidos desde el detalle.
+
+Las partidas con resultados guardados siguen visibles aunque Go se reinicie. El panel no calcula estadísticas: las obtiene de Scala mediante rutas de consulta del mismo servidor Go. Las API JSON originales continúan disponibles, incluida la raíz `/` como índice. Si se usa una URL Scala personalizada, el panel requiere que termine en `/analyze`.

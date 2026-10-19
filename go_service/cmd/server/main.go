@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/config"
+	"github.com/Brxck2203/LenguajesProject1/go_service/internal/dashboard"
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/inbox"
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/match"
 	"github.com/Brxck2203/LenguajesProject1/go_service/internal/processing"
@@ -51,6 +52,12 @@ func run() error {
 		return err
 	}
 	options := []httptransport.Option{httptransport.WithCatalog(validator.Catalog())}
+	panel, panelErr := dashboard.New(settings.ScalaURL, service)
+	if panelErr != nil {
+		log.Printf("dashboard disabled: %v", panelErr)
+	} else {
+		options = append(options, httptransport.WithDashboard(panel))
+	}
 
 	// Optional file ingestion: the watcher feeds the same service as the HTTP API.
 	inboxCtx, stopInbox := context.WithCancel(context.Background())

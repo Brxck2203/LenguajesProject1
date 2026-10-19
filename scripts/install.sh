@@ -45,6 +45,7 @@ fi
 cat <<'MSG'
 
 GameStats está listo:
+  Panel de revisión:  http://localhost:8081/dashboard
   Go (ingestión):      http://localhost:8081/        (partidas: /matches, catálogo: /catalog, bandeja: /inbox)
   Scala (análisis):    http://localhost:8080/        (resultados: /results, por juego: /stats/games)
   Bandeja de eventos:  ./data/inbox    Resultados JSON: ./data/results
