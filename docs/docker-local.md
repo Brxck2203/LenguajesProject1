@@ -8,10 +8,10 @@ Antes de fusionar el PR, usar su rama:
 
 ```powershell
 git fetch origin
-git switch --track origin/feature/integrated-gamestats-release
+git switch --track origin/feature/review-dashboard
 ```
 
-Si la rama ya existe localmente, ejecutar `git switch feature/integrated-gamestats-release` y `git pull --ff-only`. Después del merge, usar `git switch main` y `git pull --ff-only`. Guardar los cambios locales propios antes de cambiar de rama.
+Si la rama ya existe localmente, ejecutar `git switch feature/review-dashboard` y `git pull --ff-only`. Después del merge, usar `git switch main` y `git pull --ff-only`. Guardar los cambios locales propios antes de cambiar de rama.
 
 ## 2. Comprobar Docker y puertos
 
